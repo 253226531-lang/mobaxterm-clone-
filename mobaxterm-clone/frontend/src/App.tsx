@@ -203,7 +203,6 @@ function App() {
             style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
         >
             <Sidebar
-                width={sidebarWidth}
                 onSessionSelect={handleSessionSelect}
                 onNewSession={() => {
                     setEditingSession(null);
@@ -213,7 +212,7 @@ function App() {
                 activeSession={activeBackendSessionId}
                 activeSessionId={activeBackendSessionId}
                 onConnectSaved={handleConnectSaved}
-                onEditSession={(session) => {
+                onEditSession={(session: any) => {
                     setEditingSession(session);
                     setIsModalOpen(true);
                 }}

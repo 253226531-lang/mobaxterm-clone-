@@ -26,7 +26,7 @@ interface SidebarProps {
     onEditSession: (session: any) => void;
     refreshTrigger: number;
     activeSessionId?: string | null;
-    width: number;
+    width?: number;
 }
 
 const tabItems = [
