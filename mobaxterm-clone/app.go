@@ -505,3 +505,37 @@ func (a *App) OpenSaveDialog(filename string) (string, error) {
 		DefaultFilename: filename,
 	})
 }
+
+func (a *App) SaveMacro(m db.Macro) error {
+	return a.db.SaveMacro(m)
+}
+
+func (a *App) GetAllMacros() ([]db.Macro, error) {
+	return a.db.GetAllMacros()
+}
+
+func (a *App) DeleteMacro(id string) error {
+	return a.db.DeleteMacro(id)
+}
+
+func (a *App) ExecuteMacro(sessionId string, macroId string) error {
+	steps, err := a.db.GetMacroSteps(macroId)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for _, step := range steps {
+			// Use \r for common network devices
+			data := step.Command + "\r"
+			a.logCommand(sessionId, data)
+			_ = a.manager.Write(sessionId, []byte(data))
+
+			if step.DelayMs > 0 {
+				time.Sleep(time.Duration(step.DelayMs) * time.Millisecond)
+			}
+		}
+	}()
+
+	return nil
+}

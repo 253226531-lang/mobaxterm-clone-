@@ -20,6 +20,24 @@ type KnowledgeEntry struct {
 	Description string `json:"description"`
 }
 
+// Macro represents a sequence of commands to be executed
+type Macro struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Steps       []MacroStep `json:"steps"`
+	CreatedAt   string      `json:"createdAt"`
+}
+
+// MacroStep represents a single command in a macro
+type MacroStep struct {
+	ID        int    `json:"id"`
+	MacroID   string `json:"macroId"`
+	Command   string `json:"command"`
+	DelayMs   int    `json:"delayMs"`
+	StepOrder int    `json:"stepOrder"`
+}
+
 type Database struct {
 	db *sql.DB
 }
@@ -79,7 +97,22 @@ func InitDB(dbPath string) (*Database, error) {
 	);
 	CREATE INDEX IF NOT EXISTS idx_sessions_name ON sessions(name);
 	CREATE INDEX IF NOT EXISTS idx_command_logs_session_id ON command_logs(session_id);
-	CREATE INDEX IF NOT EXISTS idx_command_logs_timestamp ON command_logs(timestamp);`
+	CREATE INDEX IF NOT EXISTS idx_command_logs_timestamp ON command_logs(timestamp);
+	
+	CREATE TABLE IF NOT EXISTS macros (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		description TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE IF NOT EXISTS macro_steps (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		macro_id TEXT NOT NULL,
+		command TEXT NOT NULL,
+		delay_ms INTEGER DEFAULT 100,
+		step_order INTEGER NOT NULL,
+		FOREIGN KEY(macro_id) REFERENCES macros(id) ON DELETE CASCADE
+	);`
 
 	_, err = db.Exec(createTableSQL)
 	if err != nil {
@@ -197,6 +230,91 @@ func (d *Database) GetAllSessions() ([]config.Config, error) {
 
 func (d *Database) DeleteSession(id string) error {
 	_, err := d.db.Exec(`DELETE FROM sessions WHERE id = ?`, id)
+	return err
+}
+
+// --- Macro Persistence ---
+
+func (d *Database) SaveMacro(m Macro) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Upsert macro info
+	_, err = tx.Exec(`INSERT OR REPLACE INTO macros(id, name, description) VALUES (?, ?, ?)`,
+		m.ID, m.Name, m.Description)
+	if err != nil {
+		return err
+	}
+
+	// Delete existing steps
+	_, err = tx.Exec(`DELETE FROM macro_steps WHERE macro_id = ?`, m.ID)
+	if err != nil {
+		return err
+	}
+
+	// Insert new steps
+	for _, step := range m.Steps {
+		_, err = tx.Exec(`INSERT INTO macro_steps(macro_id, command, delay_ms, step_order) VALUES (?, ?, ?, ?)`,
+			m.ID, step.Command, step.DelayMs, step.StepOrder)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (d *Database) GetAllMacros() ([]Macro, error) {
+	rows, err := d.db.Query(`SELECT id, name, COALESCE(description,''), created_at FROM macros ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var macros []Macro
+	for rows.Next() {
+		var m Macro
+		err = rows.Scan(&m.ID, &m.Name, &m.Description, &m.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+
+		// Load steps for each macro
+		steps, err := d.GetMacroSteps(m.ID)
+		if err != nil {
+			return nil, err
+		}
+		m.Steps = steps
+
+		macros = append(macros, m)
+	}
+	return macros, nil
+}
+
+func (d *Database) GetMacroSteps(macroID string) ([]MacroStep, error) {
+	rows, err := d.db.Query(`SELECT id, macro_id, command, delay_ms, step_order FROM macro_steps WHERE macro_id = ? ORDER BY step_order`, macroID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var steps []MacroStep
+	for rows.Next() {
+		var s MacroStep
+		err = rows.Scan(&s.ID, &s.MacroID, &s.Command, &s.DelayMs, &s.StepOrder)
+		if err != nil {
+			return nil, err
+		}
+		steps = append(steps, s)
+	}
+	return steps, nil
+}
+
+func (d *Database) DeleteMacro(id string) error {
+	_, err := d.db.Exec(`DELETE FROM macros WHERE id = ?`, id)
 	return err
 }
 

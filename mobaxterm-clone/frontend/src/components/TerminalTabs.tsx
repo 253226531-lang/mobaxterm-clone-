@@ -5,7 +5,8 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { X, Plus, Terminal as TermIcon, Columns, Layout, Download, Radio, Send, Zap, AlertTriangle, RotateCcw, Trash2, Copy, Clipboard } from 'lucide-react';
 import { EventsOn, EventsOff, EventsEmit } from '../../wailsjs/runtime/runtime';
-import { WriteTerminal, ResizeTerminal, SaveTerminalLog, WriteMultipleTerminals } from '../../wailsjs/go/main/App';
+import { WriteTerminal, ResizeTerminal, SaveTerminalLog, WriteMultipleTerminals, GetAllMacros, ExecuteMacro } from '../../wailsjs/go/main/App';
+import { Macro } from './MacroManager';
 
 export interface Tab {
     id: string;
@@ -93,6 +94,8 @@ export default function TerminalTabs({
     const [riskyCommand, setRiskyCommand] = useState('');
     const [menu, setMenu] = useState<any>(null);
     const [isSafetyModalOpen, setIsSafetyModalOpen] = useState(false);
+    const [macros, setMacros] = useState<Macro[]>([]);
+    const [showMacroList, setShowMacroList] = useState(false);
 
 
     const addTab = () => {
@@ -154,6 +157,29 @@ export default function TerminalTabs({
 
     const confirmBroadcast = () => {
         executeBroadcast(riskyCommand);
+    };
+
+    const loadMacros = async () => {
+        try {
+            const data = await GetAllMacros();
+            setMacros(data || []);
+        } catch (e) { }
+    };
+
+    useEffect(() => {
+        loadMacros();
+    }, []);
+
+    const handleExecuteMacro = async (macroId: string) => {
+        const activeTab = tabs.find(t => t.id === activeTabId);
+        if (activeTab) {
+            try {
+                await ExecuteMacro(activeTab.sessionId, macroId);
+                setShowMacroList(false);
+            } catch (e) {
+                console.error("Macro execution failed:", e);
+            }
+        }
     };
 
     useEffect(() => {
@@ -221,6 +247,38 @@ export default function TerminalTabs({
                     >
                         <Download size={14} />
                     </button>
+
+                    <div className="relative">
+                        <button
+                            onClick={() => {
+                                setShowMacroList(!showMacroList);
+                                if (!showMacroList) loadMacros();
+                            }}
+                            className={`p-1.5 rounded-md transition-all duration-200 ${showMacroList ? 'text-[#388BFD] bg-[#388BFD]/10' : 'text-[#6E7681] hover:text-[#C9D1D9] hover:bg-[#21262D]'}`}
+                            title="执行宏指令"
+                        >
+                            <Zap size={14} />
+                        </button>
+
+                        {showMacroList && (
+                            <div className="absolute right-0 top-full mt-1 w-48 bg-[#161B22] border border-[#30363D] rounded-lg shadow-2xl py-2 z-[70] animate-fade-in">
+                                <div className="px-3 py-1 text-[10px] font-bold text-[#8B949E] uppercase tracking-wider mb-1 border-b border-[#30363D]/50">可用宏</div>
+                                {macros.length === 0 ? (
+                                    <div className="px-3 py-2 text-[11px] text-[#484F58]">无可用宏</div>
+                                ) : (
+                                    macros.map(m => (
+                                        <button
+                                            key={m.id}
+                                            onClick={() => handleExecuteMacro(m.id)}
+                                            className="w-full px-3 py-2 text-left text-[12px] text-[#C9D1D9] hover:bg-[#388BFD] hover:text-white transition-colors truncate"
+                                        >
+                                            {m.name}
+                                        </button>
+                                    ))
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 

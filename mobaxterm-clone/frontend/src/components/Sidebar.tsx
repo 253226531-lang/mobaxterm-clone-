@@ -4,6 +4,7 @@ import SFTPBrowser from './SFTPBrowser';
 import KBSearch from './KBSearch';
 import HistoryLogs from './HistoryLogs';
 import TFTPServer from './TFTPServer';
+import MacroManager from './MacroManager';
 import { GetAllSessions, DeleteSession } from '../../wailsjs/go/main/App';
 
 interface SavedSession {
@@ -31,6 +32,7 @@ const tabItems = [
     { key: 'sessions' as const, icon: Terminal, label: '会话' },
     { key: 'sftp' as const, icon: FolderGit2, label: 'SFTP' },
     { key: 'kb' as const, icon: BookOpen, label: '知识库' },
+    { key: 'macros' as const, icon: Cable, label: '宏' },
     { key: 'logs' as const, icon: History, label: '日志' },
     { key: 'tftp' as const, icon: Globe, label: 'TFTP' },
 ];
@@ -46,7 +48,7 @@ export default function Sidebar({
     activeSessionId,
     width
 }: SidebarProps) {
-    const [activeTab, setActiveTab] = useState<'sessions' | 'sftp' | 'kb' | 'logs' | 'tftp'>('sessions');
+    const [activeTab, setActiveTab] = useState<'sessions' | 'sftp' | 'kb' | 'macros' | 'logs' | 'tftp'>('sessions');
     const [sessions, setSessions] = useState<SavedSession[]>([]);
 
     const loadSessions = useCallback(async () => {
@@ -176,6 +178,12 @@ export default function Sidebar({
                 {activeTab === 'kb' && (
                     <div className="h-full animate-fade-in">
                         <KBSearch activeSessionId={activeSessionId} />
+                    </div>
+                )}
+
+                {activeTab === 'macros' && (
+                    <div className="h-full animate-fade-in">
+                        <MacroManager activeSessionId={activeSessionId} />
                     </div>
                 )}
 
