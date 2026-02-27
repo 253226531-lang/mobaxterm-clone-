@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import TerminalTabs from './components/TerminalTabs';
 import SessionModal from './components/SessionModal';
@@ -29,6 +29,39 @@ function App() {
     const [showKBPanel, setShowKBPanel] = useState(false);
     const [isSplit, setIsSplit] = useState(false);
     const [rightTabId, setRightTabId] = useState<string | null>(null);
+    const [sidebarWidth, setSidebarWidth] = useState(260);
+    const [isResizing, setIsResizing] = useState(false);
+
+    const startResizing = useCallback(() => {
+        setIsResizing(true);
+    }, []);
+
+    const stopResizing = useCallback(() => {
+        setIsResizing(false);
+    }, []);
+
+    const resize = useCallback((mouseMoveEvent: MouseEvent) => {
+        if (isResizing) {
+            const newWidth = mouseMoveEvent.clientX;
+            if (newWidth >= 200 && newWidth <= 600) {
+                setSidebarWidth(newWidth);
+            }
+        }
+    }, [isResizing]);
+
+    useEffect(() => {
+        if (isResizing) {
+            window.addEventListener('mousemove', resize);
+            window.addEventListener('mouseup', stopResizing);
+        } else {
+            window.removeEventListener('mousemove', resize);
+            window.removeEventListener('mouseup', stopResizing);
+        }
+        return () => {
+            window.removeEventListener('mousemove', resize);
+            window.removeEventListener('mouseup', stopResizing);
+        };
+    }, [isResizing, resize, stopResizing]);
 
     // Sync ref with state to allow access in handlers without closure issues
     useEffect(() => {
@@ -157,8 +190,11 @@ function App() {
     const activeBackendSessionId = activeTab?.sessionId || null;
 
     return (
-        <div className="flex h-screen w-screen overflow-hidden bg-[#0D1117] text-[#C9D1D9] font-inter">
+        <div
+            className={`flex h-screen w-screen overflow-hidden bg-[#0D1117] text-[#C9D1D9] font-inter ${isResizing ? 'cursor-col-resize select-none' : ''}`}
+        >
             <Sidebar
+                width={sidebarWidth}
                 onSessionSelect={handleSessionSelect}
                 onNewSession={() => {
                     setEditingSession(null);
@@ -173,6 +209,13 @@ function App() {
                     setIsModalOpen(true);
                 }}
                 refreshTrigger={refreshTrigger}
+            />
+
+            {/* Resizer Handle */}
+            <div
+                className={`w-[4px] h-full transition-colors duration-200 cursor-col-resize shrink-0 z-20 ${isResizing ? 'bg-[#388BFD]' : 'hover:bg-[#388BFD]/50'}`}
+                onMouseDown={startResizing}
+                style={{ borderRight: '1px solid rgba(48,54,61,0.2)' }}
             />
 
             <main className="flex-1 flex flex-col min-w-0 relative">

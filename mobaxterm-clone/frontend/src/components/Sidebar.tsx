@@ -24,6 +24,7 @@ interface SidebarProps {
     onEditSession: (session: any) => void;
     refreshTrigger: number;
     activeSessionId?: string | null;
+    width: number;
 }
 
 const tabItems = [
@@ -42,7 +43,8 @@ export default function Sidebar({
     onConnectSaved,
     onEditSession,
     refreshTrigger,
-    activeSessionId
+    activeSessionId,
+    width
 }: SidebarProps) {
     const [activeTab, setActiveTab] = useState<'sessions' | 'sftp' | 'kb' | 'logs' | 'tftp'>('sessions');
     const [sessions, setSessions] = useState<SavedSession[]>([]);
@@ -81,7 +83,14 @@ export default function Sidebar({
     };
 
     return (
-        <div className="w-64 h-full flex flex-col" style={{ background: '#0D1117', borderRight: '1px solid rgba(48,54,61,0.6)' }}>
+        <div
+            className="h-full flex flex-col shrink-0"
+            style={{
+                width: `${width}px`,
+                background: '#0D1117',
+                borderRight: '1px solid rgba(48,54,61,0.6)'
+            }}
+        >
             {/* Tab Bar */}
             <div className="flex shrink-0" style={{ background: '#161B22' }}>
                 {tabItems.map(({ key, icon: Icon, label }) => (
