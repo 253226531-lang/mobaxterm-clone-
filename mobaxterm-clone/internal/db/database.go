@@ -87,6 +87,9 @@ func InitDB(dbPath string) (*Database, error) {
 		return nil, fmt.Errorf("创建数据表失败: %w", err)
 	}
 
+	// Migration: Add encoding column to sessions if not exists
+	_, _ = db.Exec("ALTER TABLE sessions ADD COLUMN encoding TEXT")
+
 	return &Database{db: db}, nil
 }
 
@@ -167,14 +170,14 @@ func (d *Database) SearchEntries(query string) ([]KnowledgeEntry, error) {
 // --- Session Persistence ---
 
 func (d *Database) SaveSession(cfg config.Config) error {
-	upsertSQL := `INSERT OR REPLACE INTO sessions(id, name, protocol, host, port, username, password, baud_rate, com_port, description)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := d.db.Exec(upsertSQL, cfg.ID, cfg.Name, cfg.Protocol, cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.BaudRate, cfg.ComPort, cfg.Description)
+	upsertSQL := `INSERT OR REPLACE INTO sessions(id, name, protocol, host, port, username, password, baud_rate, com_port, description, encoding)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := d.db.Exec(upsertSQL, cfg.ID, cfg.Name, cfg.Protocol, cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.BaudRate, cfg.ComPort, cfg.Description, cfg.Encoding)
 	return err
 }
 
 func (d *Database) GetAllSessions() ([]config.Config, error) {
-	rows, err := d.db.Query(`SELECT id, name, protocol, COALESCE(host,''), COALESCE(port,0), COALESCE(username,''), COALESCE(password,''), COALESCE(baud_rate,0), COALESCE(com_port,''), COALESCE(description,'') FROM sessions ORDER BY name`)
+	rows, err := d.db.Query(`SELECT id, name, protocol, COALESCE(host,''), COALESCE(port,0), COALESCE(username,''), COALESCE(password,''), COALESCE(baud_rate,0), COALESCE(com_port,''), COALESCE(description,''), COALESCE(encoding,'UTF-8') FROM sessions ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +186,7 @@ func (d *Database) GetAllSessions() ([]config.Config, error) {
 	var sessions []config.Config
 	for rows.Next() {
 		var s config.Config
-		err = rows.Scan(&s.ID, &s.Name, &s.Protocol, &s.Host, &s.Port, &s.Username, &s.Password, &s.BaudRate, &s.ComPort, &s.Description)
+		err = rows.Scan(&s.ID, &s.Name, &s.Protocol, &s.Host, &s.Port, &s.Username, &s.Password, &s.BaudRate, &s.ComPort, &s.Description, &s.Encoding)
 		if err != nil {
 			return nil, err
 		}
