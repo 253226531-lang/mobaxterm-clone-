@@ -15,6 +15,7 @@ export namespace config {
 	    flowControl?: string;
 	    comPort?: string;
 	    description?: string;
+	    encoding?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -36,6 +37,7 @@ export namespace config {
 	        this.flowControl = source["flowControl"];
 	        this.comPort = source["comPort"];
 	        this.description = source["description"];
+	        this.encoding = source["encoding"];
 	    }
 	}
 
