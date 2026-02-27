@@ -189,8 +189,10 @@ export default function TerminalTabs({
     return (
         <div className="flex-1 flex flex-col h-full overflow-hidden relative" style={{ background: '#0D1117' }}>
             {/* Tab Bar */}
-            <div className="flex items-center shrink-0 overflow-x-auto pr-2" style={{ background: '#161B22', borderBottom: '1px solid rgba(48,54,61,0.6)' }}>
-                <div className="flex-1 flex min-w-0">
+            {/* Tab Bar Header Container */}
+            <div className="flex items-center shrink-0 pr-2 bg-[#161B22] border-b border-[#30363D]/60">
+                {/* Scrollable Tabs Part */}
+                <div className="flex-1 flex min-w-0 overflow-x-auto no-scrollbar">
                     {tabs.map((tab) => (
                         <div
                             key={tab.id}
@@ -225,7 +227,7 @@ export default function TerminalTabs({
                             )}
                         </div>
                     ))}
-                    <Plus size={14} className="mx-3 text-[#484F58] cursor-not-allowed opacity-50" />
+                    <Plus size={14} className="mx-3 my-auto text-[#484F58] cursor-not-allowed opacity-50 shrink-0" />
                 </div>
 
                 <div className="flex items-center gap-1 px-2 border-l border-[#30363D]">
@@ -246,7 +248,8 @@ export default function TerminalTabs({
 
                     <div className="relative">
                         <button
-                            onClick={() => {
+                            onClick={(e) => {
+                                e.stopPropagation();
                                 setShowMacroList(!showMacroList);
                                 if (!showMacroList) loadMacros();
                             }}
@@ -257,7 +260,10 @@ export default function TerminalTabs({
                         </button>
 
                         {showMacroList && (
-                            <div className="absolute right-0 top-full mt-1 w-48 bg-[#161B22] border border-[#30363D] rounded-lg shadow-2xl py-2 z-[70] animate-fade-in">
+                            <div
+                                className="absolute right-0 top-full mt-1 w-48 bg-[#161B22] border border-[#30363D] rounded-lg shadow-2xl py-2 z-[70] animate-fade-in"
+                                onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside menu content
+                            >
                                 <div className="px-3 py-1 text-[10px] font-bold text-[#8B949E] uppercase tracking-wider mb-1 border-b border-[#30363D]/50">可用宏</div>
                                 {macros.length === 0 ? (
                                     <div className="px-3 py-2 text-[11px] text-[#484F58]">无可用宏</div>
@@ -265,7 +271,9 @@ export default function TerminalTabs({
                                     macros.map(m => (
                                         <button
                                             key={m.id}
-                                            onClick={() => handleExecuteMacro(m.id)}
+                                            onClick={(e) => {
+                                                handleExecuteMacro(m.id);
+                                            }}
                                             className="w-full px-3 py-2 text-left text-[12px] text-[#C9D1D9] hover:bg-[#388BFD] hover:text-white transition-colors truncate"
                                         >
                                             {m.name}

@@ -524,12 +524,18 @@ func (a *App) ExecuteMacro(sessionId string, macroId string) error {
 		return err
 	}
 
+	if len(steps) == 0 {
+		return fmt.Errorf("该宏没有步骤")
+	}
+
 	go func() {
 		for _, step := range steps {
-			// Use \r for common network devices
 			data := step.Command + "\r"
 			a.logCommand(sessionId, data)
-			_ = a.manager.Write(sessionId, []byte(data))
+			err := a.manager.Write(sessionId, []byte(data))
+			if err != nil {
+				return
+			}
 
 			if step.DelayMs > 0 {
 				time.Sleep(time.Duration(step.DelayMs) * time.Millisecond)
