@@ -6,7 +6,7 @@ import '@xterm/xterm/css/xterm.css';
 import { X, Plus, Terminal as TermIcon, Columns, Layout, Download, Radio, Send, Zap, AlertTriangle, RotateCcw, Trash2, Copy, Clipboard } from 'lucide-react';
 import { EventsOn, EventsOff, EventsEmit } from '../../wailsjs/runtime/runtime';
 import { WriteTerminal, ResizeTerminal, SaveTerminalLog, WriteMultipleTerminals, GetAllMacros, ExecuteMacro } from '../../wailsjs/go/main/App';
-import { Macro } from './MacroManager';
+import { db } from '../../wailsjs/go/models';
 
 export interface Tab {
     id: string;
@@ -94,7 +94,7 @@ export default function TerminalTabs({
     const [riskyCommand, setRiskyCommand] = useState('');
     const [menu, setMenu] = useState<any>(null);
     const [isSafetyModalOpen, setIsSafetyModalOpen] = useState(false);
-    const [macros, setMacros] = useState<Macro[]>([]);
+    const [macros, setMacros] = useState<db.Macro[]>([]);
     const [showMacroList, setShowMacroList] = useState(false);
 
 

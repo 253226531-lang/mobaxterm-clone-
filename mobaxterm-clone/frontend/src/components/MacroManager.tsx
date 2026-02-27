@@ -1,30 +1,17 @@
 import { useState, useEffect } from 'react';
 import { Play, Plus, Trash2, Edit3, Save, X, ChevronDown, ChevronUp, Clock } from 'lucide-react';
 import { GetAllMacros, SaveMacro, DeleteMacro, ExecuteMacro } from '../../wailsjs/go/main/App';
-
-export interface MacroStep {
-    id?: number;
-    macroId?: string;
-    command: string;
-    delayMs: number;
-    stepOrder: number;
-}
-
-export interface Macro {
-    id: string;
-    name: string;
-    description: string;
-    steps: MacroStep[];
-    createdAt?: string;
-}
+import { db } from '../../wailsjs/go/models';
 
 interface MacroManagerProps {
     activeSessionId?: string | null;
 }
 
+
+
 export default function MacroManager({ activeSessionId }: MacroManagerProps) {
-    const [macros, setMacros] = useState<Macro[]>([]);
-    const [editingMacro, setEditingMacro] = useState<Macro | null>(null);
+    const [macros, setMacros] = useState<db.Macro[]>([]);
+    const [editingMacro, setEditingMacro] = useState<db.Macro | null>(null);
     const [isAdding, setIsAdding] = useState(false);
 
     useEffect(() => {
@@ -61,21 +48,21 @@ export default function MacroManager({ activeSessionId }: MacroManagerProps) {
 
     const addNewStep = () => {
         if (!editingMacro) return;
-        const newSteps = [...editingMacro.steps, { command: '', delayMs: 500, stepOrder: editingMacro.steps.length }];
-        setEditingMacro({ ...editingMacro, steps: newSteps });
+        const newSteps = [...editingMacro.steps, db.MacroStep.createFrom({ command: '', delayMs: 500, stepOrder: editingMacro.steps.length })];
+        setEditingMacro(db.Macro.createFrom({ ...editingMacro, steps: newSteps }));
     };
 
     const removeStep = (index: number) => {
         if (!editingMacro) return;
-        const newSteps = editingMacro.steps.filter((_, i) => i !== index).map((s, i) => ({ ...s, stepOrder: i }));
-        setEditingMacro({ ...editingMacro, steps: newSteps });
+        const newSteps = editingMacro.steps.filter((_, i) => i !== index).map((s, i) => db.MacroStep.createFrom({ ...s, stepOrder: i }));
+        setEditingMacro(db.Macro.createFrom({ ...editingMacro, steps: newSteps }));
     };
 
-    const updateStep = (index: number, field: keyof MacroStep, value: any) => {
+    const updateStep = (index: number, field: keyof db.MacroStep, value: any) => {
         if (!editingMacro) return;
         const newSteps = [...editingMacro.steps];
-        newSteps[index] = { ...newSteps[index], [field]: value };
-        setEditingMacro({ ...editingMacro, steps: newSteps });
+        newSteps[index] = db.MacroStep.createFrom({ ...newSteps[index], [field]: value });
+        setEditingMacro(db.Macro.createFrom({ ...editingMacro, steps: newSteps }));
     };
 
     return (
@@ -87,7 +74,7 @@ export default function MacroManager({ activeSessionId }: MacroManagerProps) {
                         <button
                             onClick={() => {
                                 setIsAdding(true);
-                                setEditingMacro({ id: `macro-${Date.now()}`, name: '', description: '', steps: [] });
+                                setEditingMacro(db.Macro.createFrom({ id: `macro-${Date.now()}`, name: '', description: '', steps: [], createdAt: '' }));
                             }}
                             className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded transition-all duration-200 accent-gradient text-white hover:opacity-90"
                         >
@@ -153,8 +140,8 @@ export default function MacroManager({ activeSessionId }: MacroManagerProps) {
                         <div className="space-y-1">
                             <label className="text-[11px] text-[#8B949E] font-medium ml-1">名称</label>
                             <input
-                                value={editingMacro?.name}
-                                onChange={e => setEditingMacro({ ...editingMacro!, name: e.target.value })}
+                                value={editingMacro?.name || ''}
+                                onChange={e => setEditingMacro(db.Macro.createFrom({ ...editingMacro!, name: e.target.value }))}
                                 className="w-full bg-[#0D1117] border border-[#30363D] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#388BFD] transition-all"
                                 placeholder="宏名称 (例: 查看光衰)"
                             />
@@ -163,8 +150,8 @@ export default function MacroManager({ activeSessionId }: MacroManagerProps) {
                         <div className="space-y-1">
                             <label className="text-[11px] text-[#8B949E] font-medium ml-1">描述 (可选)</label>
                             <input
-                                value={editingMacro?.description}
-                                onChange={e => setEditingMacro({ ...editingMacro!, description: e.target.value })}
+                                value={editingMacro?.description || ''}
+                                onChange={e => setEditingMacro(db.Macro.createFrom({ ...editingMacro!, description: e.target.value }))}
                                 className="w-full bg-[#0D1117] border border-[#30363D] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#388BFD] transition-all"
                                 placeholder="输入宏的描述信息..."
                             />

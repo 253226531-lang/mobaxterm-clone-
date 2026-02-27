@@ -14,11 +14,17 @@ export function Connect(arg1:config.Config):Promise<string>;
 
 export function DeleteKnowledgeEntry(arg1:number):Promise<void>;
 
+export function DeleteMacro(arg1:string):Promise<void>;
+
 export function DeleteSession(arg1:string):Promise<void>;
+
+export function ExecuteMacro(arg1:string,arg2:string):Promise<void>;
 
 export function ExportKnowledgeBase():Promise<void>;
 
 export function GetAllKnowledgeEntries():Promise<Array<db.KnowledgeEntry>>;
+
+export function GetAllMacros():Promise<Array<db.Macro>>;
 
 export function GetAllSessions():Promise<Array<config.Config>>;
 
@@ -47,6 +53,8 @@ export function SFTPDownload(arg1:string,arg2:string,arg3:string):Promise<void>;
 export function SFTPListDirectory(arg1:string,arg2:string):Promise<Array<connection.FileInfo>>;
 
 export function SFTPUpload(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function SaveMacro(arg1:db.Macro):Promise<void>;
 
 export function SaveSession(arg1:config.Config):Promise<void>;
 

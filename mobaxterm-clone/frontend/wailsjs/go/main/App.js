@@ -22,8 +22,16 @@ export function DeleteKnowledgeEntry(arg1) {
   return window['go']['main']['App']['DeleteKnowledgeEntry'](arg1);
 }
 
+export function DeleteMacro(arg1) {
+  return window['go']['main']['App']['DeleteMacro'](arg1);
+}
+
 export function DeleteSession(arg1) {
   return window['go']['main']['App']['DeleteSession'](arg1);
+}
+
+export function ExecuteMacro(arg1, arg2) {
+  return window['go']['main']['App']['ExecuteMacro'](arg1, arg2);
 }
 
 export function ExportKnowledgeBase() {
@@ -32,6 +40,10 @@ export function ExportKnowledgeBase() {
 
 export function GetAllKnowledgeEntries() {
   return window['go']['main']['App']['GetAllKnowledgeEntries']();
+}
+
+export function GetAllMacros() {
+  return window['go']['main']['App']['GetAllMacros']();
 }
 
 export function GetAllSessions() {
@@ -88,6 +100,10 @@ export function SFTPListDirectory(arg1, arg2) {
 
 export function SFTPUpload(arg1, arg2, arg3) {
   return window['go']['main']['App']['SFTPUpload'](arg1, arg2, arg3);
+}
+
+export function SaveMacro(arg1) {
+  return window['go']['main']['App']['SaveMacro'](arg1);
 }
 
 export function SaveSession(arg1) {
