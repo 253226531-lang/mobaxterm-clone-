@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Terminal, FolderGit2, BookOpen, Plus, Settings2, Trash2, Wifi, Cable, History, Globe } from 'lucide-react';
+import { Tab } from '../types';
 import SFTPBrowser from './SFTPBrowser';
 import KBSearch from './KBSearch';
 import HistoryLogs from './HistoryLogs';
@@ -85,13 +86,9 @@ export default function Sidebar({
     };
 
     return (
-        <div
-            className="h-full flex flex-col shrink-0"
-            style={{
-                width: `${width}px`,
-                background: '#0D1117',
-                borderRight: '1px solid rgba(48,54,61,0.6)'
-            }}
+        <aside
+            className="flex flex-col h-full bg-[#161B22] border-r border-[#30363D] shrink-0 overflow-hidden relative"
+            style={{ width: 'var(--sidebar-width, 260px)' }}
         >
             {/* Tab Bar */}
             <div className="flex shrink-0" style={{ background: '#161B22' }}>
@@ -212,6 +209,6 @@ export default function Sidebar({
                     </button>
                 </div>
             )}
-        </div>
+        </aside>
     );
 }

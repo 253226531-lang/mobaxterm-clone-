@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Play, Plus, Trash2, Edit3, Save, X, ChevronDown, ChevronUp, Clock } from 'lucide-react';
 import { GetAllMacros, SaveMacro, DeleteMacro, ExecuteMacro } from '../../wailsjs/go/main/App';
-import { db } from '../../wailsjs/go/models';
+import { db } from '../types';
 
 interface MacroManagerProps {
     activeSessionId?: string | null;

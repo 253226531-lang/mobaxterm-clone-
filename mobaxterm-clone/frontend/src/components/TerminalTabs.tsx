@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, memo } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -8,11 +8,7 @@ import { EventsOn, EventsOff, EventsEmit } from '../../wailsjs/runtime/runtime';
 import { WriteTerminal, ResizeTerminal, SaveTerminalLog, WriteMultipleTerminals, GetAllMacros, ExecuteMacro } from '../../wailsjs/go/main/App';
 import { db } from '../../wailsjs/go/models';
 
-export interface Tab {
-    id: string;
-    title: string;
-    sessionId: string;
-}
+import { Tab } from '../types';
 
 interface TerminalTabsProps {
     tabs: Tab[];
@@ -42,7 +38,7 @@ const RISKY_PATTERNS = [
     /erase\s+startup-config/i
 ];
 
-const TerminalContextMenu = ({ x, y, onClose, onClear, onReconnect, onPaste }: any) => {
+const TerminalContextMenu = memo(({ x, y, onClose, onClear, onReconnect, onPaste }: any) => {
     useEffect(() => {
         const handleClick = () => onClose();
         window.addEventListener('click', handleClick);
@@ -76,7 +72,7 @@ const TerminalContextMenu = ({ x, y, onClose, onClear, onReconnect, onPaste }: a
             </button>
         </div>
     );
-};
+});
 
 export default function TerminalTabs({
     tabs,
@@ -394,7 +390,7 @@ function WelcomeScreen() {
     );
 }
 
-function XTermInstance({ sessionId, isActive }: { sessionId: string; isActive: boolean }) {
+const XTermInstance = memo(({ sessionId, isActive }: { sessionId: string; isActive: boolean }) => {
     const terminalRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<XTerm | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
@@ -594,4 +590,4 @@ function XTermInstance({ sessionId, isActive }: { sessionId: string; isActive: b
     }, [isActive]);
 
     return <div ref={terminalRef} id={`terminal-${sessionId}`} className="w-full h-full bg-[#0D1117] overflow-hidden" />;
-}
+});

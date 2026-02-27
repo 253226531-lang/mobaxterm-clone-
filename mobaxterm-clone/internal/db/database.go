@@ -268,30 +268,67 @@ func (d *Database) SaveMacro(m Macro) error {
 }
 
 func (d *Database) GetAllMacros() ([]Macro, error) {
-	rows, err := d.db.Query(`SELECT id, name, COALESCE(description,''), created_at FROM macros ORDER BY name`)
+	// Optimal approach: Get everything in one query using a join
+	query := `
+		SELECT m.id, m.name, COALESCE(m.description,''), m.created_at,
+		       s.id, s.macro_id, s.command, s.delay_ms, s.step_order
+		FROM macros m
+		LEFT JOIN macro_steps s ON m.id = s.macro_id
+		ORDER BY m.name, s.step_order`
+
+	rows, err := d.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var macros []Macro
+	macroMap := make(map[string]*Macro)
+	var result []Macro
+	var order []string
+
 	for rows.Next() {
-		var m Macro
-		err = rows.Scan(&m.ID, &m.Name, &m.Description, &m.CreatedAt)
+		var mid, mname, mdesc, mcreated string
+		var sid sql.NullInt64
+		var smid, scmd sql.NullString
+		var sdelay, sorder sql.NullInt64
+
+		err = rows.Scan(&mid, &mname, &mdesc, &mcreated, &sid, &smid, &scmd, &sdelay, &sorder)
 		if err != nil {
 			return nil, err
 		}
 
-		// Load steps for each macro
-		steps, err := d.GetMacroSteps(m.ID)
-		if err != nil {
-			return nil, err
+		m, ok := macroMap[mid]
+		if !ok {
+			m = &Macro{
+				ID:          mid,
+				Name:        mname,
+				Description: mdesc,
+				CreatedAt:   mcreated,
+				Steps:       []MacroStep{},
+			}
+			macroMap[mid] = m
+			result = append(result, *m) // This is a copy, we'll fix it below
+			order = append(order, mid)
 		}
-		m.Steps = steps
 
-		macros = append(macros, m)
+		if sid.Valid {
+			m.Steps = append(m.Steps, MacroStep{
+				ID:        int(sid.Int64),
+				MacroID:   smid.String,
+				Command:   scmd.String,
+				DelayMs:   int(sdelay.Int64),
+				StepOrder: int(sorder.Int64),
+			})
+		}
 	}
-	return macros, nil
+
+	// Finalize results from map to maintain pointers/updates
+	finalResult := make([]Macro, 0, len(macroMap))
+	for _, id := range order {
+		finalResult = append(finalResult, *macroMap[id])
+	}
+
+	return finalResult, nil
 }
 
 func (d *Database) GetMacroSteps(macroID string) ([]MacroStep, error) {

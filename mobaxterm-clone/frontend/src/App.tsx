@@ -7,14 +7,10 @@ import KnowledgeAdmin from './components/KnowledgeAdmin';
 import { Connect, SaveSession, CloseSession, GetSessionConfig } from '../wailsjs/go/main/App';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 import { BookOpen, PanelRightClose } from 'lucide-react';
+import { Tab } from './types';
 import './index.css';
 
-interface Tab {
-    id: string;
-    title: string;
-    sessionId: string;
-    configId?: string;
-}
+
 
 function App() {
     const [tabs, setTabs] = useState<Tab[]>([]);
@@ -31,20 +27,31 @@ function App() {
     const [rightTabId, setRightTabId] = useState<string | null>(null);
     const [sidebarWidth, setSidebarWidth] = useState(260);
     const [isResizing, setIsResizing] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
 
     const startResizing = useCallback(() => {
         setIsResizing(true);
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
     }, []);
 
     const stopResizing = useCallback(() => {
         setIsResizing(false);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+
+        // Final sync to state for persistence/props if needed
+        if (containerRef.current) {
+            const currentWidth = containerRef.current.querySelector('aside')?.getBoundingClientRect().width;
+            if (currentWidth) setSidebarWidth(currentWidth);
+        }
     }, []);
 
     const resize = useCallback((mouseMoveEvent: MouseEvent) => {
-        if (isResizing) {
+        if (isResizing && containerRef.current) {
             const newWidth = mouseMoveEvent.clientX;
             if (newWidth >= 200 && newWidth <= 600) {
-                setSidebarWidth(newWidth);
+                containerRef.current.style.setProperty('--sidebar-width', `${newWidth}px`);
             }
         }
     }, [isResizing]);
@@ -191,7 +198,9 @@ function App() {
 
     return (
         <div
+            ref={containerRef}
             className={`flex h-screen w-screen overflow-hidden bg-[#0D1117] text-[#C9D1D9] font-inter ${isResizing ? 'cursor-col-resize select-none' : ''}`}
+            style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
         >
             <Sidebar
                 width={sidebarWidth}
