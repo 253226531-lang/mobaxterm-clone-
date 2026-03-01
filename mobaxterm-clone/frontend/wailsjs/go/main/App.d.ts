@@ -38,9 +38,9 @@ export function GetTFTPStatus():Promise<Record<string, any>>;
 
 export function ImportKnowledgeBase():Promise<void>;
 
-export function OpenDirectoryDialog():Promise<string>;
-
 export function OpenFileDialog():Promise<string>;
+
+export function OpenFolderDialog():Promise<string>;
 
 export function OpenSaveDialog(arg1:string):Promise<string>;
 

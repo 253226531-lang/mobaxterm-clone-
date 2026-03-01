@@ -484,8 +484,8 @@ func (a *App) GetTFTPStatus() map[string]interface{} {
 	}
 }
 
-// OpenDirectoryDialog opens a directory selection dialog
-func (a *App) OpenDirectoryDialog() (string, error) {
+// OpenFolderDialog opens a directory selection dialog
+func (a *App) OpenFolderDialog() (string, error) {
 	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "选择目录",
 	})

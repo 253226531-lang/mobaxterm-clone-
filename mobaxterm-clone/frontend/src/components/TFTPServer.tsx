@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Square, FolderOpen, Activity, Terminal as TermIcon, Trash2, Clock, Globe, Shield, Info, CheckCircle2, AlertCircle, Settings2, History as HistoryIcon } from 'lucide-react';
-import { StartTFTPServer, StopTFTPServer, GetTFTPStatus, OpenDirectoryDialog } from '../../wailsjs/go/main/App';
+import { StartTFTPServer, StopTFTPServer, GetTFTPStatus, OpenFolderDialog } from '../../wailsjs/go/main/App';
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime';
 
 interface Transfer {
@@ -67,7 +67,7 @@ export default function TFTPServer() {
 
     const selectDirectory = async () => {
         try {
-            const path = await OpenDirectoryDialog();
+            const path = await OpenFolderDialog();
             if (path) setRootPath(path);
         } catch (err) {
             console.error("Failed to open directory dialog:", err);

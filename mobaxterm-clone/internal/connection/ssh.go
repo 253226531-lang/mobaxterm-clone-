@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 
 	// Added time import as per instruction
 	"mobaxterm-clone/internal/config"
@@ -203,30 +204,68 @@ func (s *sshSession) DownloadFile(remotePath, localPath string) error {
 	return nil
 }
 
-// UploadFile uploads a file from the local machine to the remote server.
+// UploadFile uploads a file or directory from the local machine to the remote server.
 func (s *sshSession) UploadFile(localPath, remotePath string) error {
 	if s.sftp == nil {
 		return fmt.Errorf("SFTP客户端未初始化")
 	}
 
-	localFile, err := os.Open(localPath)
+	// Check if local path is a directory
+	localInfo, err := os.Stat(localPath)
 	if err != nil {
-		return fmt.Errorf("打开本地文件失败 %s: %w", localPath, err)
-	}
-	defer localFile.Close()
-
-	remoteFile, err := s.sftp.Create(remotePath)
-	if err != nil {
-		return fmt.Errorf("创建远程文件失败 %s: %w", remotePath, err)
-	}
-	defer remoteFile.Close()
-
-	_, err = io.Copy(remoteFile, localFile)
-	if err != nil {
-		return fmt.Errorf("从本地复制文件到远程失败: %w", err)
+		return fmt.Errorf("获取本地路径信息失败 %s: %w", localPath, err)
 	}
 
-	return nil
+	if localInfo.IsDir() {
+		// Create remote directory if it doesn't exist
+		if err := s.sftp.MkdirAll(remotePath); err != nil {
+			return fmt.Errorf("创建远程目录失败 %s: %w", remotePath, err)
+		}
+
+		// Read local directory contents
+		entries, err := os.ReadDir(localPath)
+		if err != nil {
+			return fmt.Errorf("读取本地目录失败 %s: %w", localPath, err)
+		}
+
+		// Recursively upload each entry
+		for _, entry := range entries {
+			localEntryPath := localPath + "/" + entry.Name()
+			remoteEntryPath := remotePath + "/" + entry.Name()
+
+			if err := s.UploadFile(localEntryPath, remoteEntryPath); err != nil {
+				return fmt.Errorf("上传 %s 失败: %w", localEntryPath, err)
+			}
+		}
+
+		return nil
+	} else {
+		// Upload single file
+		localFile, err := os.Open(localPath)
+		if err != nil {
+			return fmt.Errorf("打开本地文件失败 %s: %w", localPath, err)
+		}
+		defer localFile.Close()
+
+		// Ensure remote directory exists
+		remoteDir := remotePath[:len(remotePath)-len(filepath.Base(remotePath))]
+		if err := s.sftp.MkdirAll(remoteDir); err != nil {
+			return fmt.Errorf("创建远程目录失败 %s: %w", remoteDir, err)
+		}
+
+		remoteFile, err := s.sftp.Create(remotePath)
+		if err != nil {
+			return fmt.Errorf("创建远程文件失败 %s: %w", remotePath, err)
+		}
+		defer remoteFile.Close()
+
+		_, err = io.Copy(remoteFile, localFile)
+		if err != nil {
+			return fmt.Errorf("从本地复制文件到远程失败: %w", err)
+		}
+
+		return nil
+	}
 }
 
 // DeletePath deletes a file or directory on the remote server.

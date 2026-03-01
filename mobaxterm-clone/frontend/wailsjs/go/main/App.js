@@ -70,12 +70,12 @@ export function ImportKnowledgeBase() {
   return window['go']['main']['App']['ImportKnowledgeBase']();
 }
 
-export function OpenDirectoryDialog() {
-  return window['go']['main']['App']['OpenDirectoryDialog']();
-}
-
 export function OpenFileDialog() {
   return window['go']['main']['App']['OpenFileDialog']();
+}
+
+export function OpenFolderDialog() {
+  return window['go']['main']['App']['OpenFolderDialog']();
 }
 
 export function OpenSaveDialog(arg1) {

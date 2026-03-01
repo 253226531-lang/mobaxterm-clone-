@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { SFTPListDirectory, SFTPDownload, SFTPUpload, SFTPDelete, OpenFileDialog, OpenSaveDialog } from '../../wailsjs/go/main/App';
+import { SFTPListDirectory, SFTPDownload, SFTPUpload, SFTPDelete, OpenFileDialog, OpenSaveDialog, OpenFolderDialog } from '../../wailsjs/go/main/App';
 import { connection } from '../../wailsjs/go/models';
 import { Folder, File, ArrowUpCircle, ArrowDownCircle, RefreshCw, ChevronUp, Download, Upload, Trash2 } from 'lucide-react';
 
@@ -82,6 +82,25 @@ export default function SFTPBrowser({ sessionId }: SFTPBrowserProps) {
         }
     };
 
+    const handleUploadFolder = async () => {
+        if (!sessionId) return;
+        try {
+            const localPath = await OpenFolderDialog();
+            if (!localPath) return;
+
+            setLoading(true);
+            const folderName = localPath.split(/[\\/]/).pop();
+            const remotePath = currentPath === '/' ? `/${folderName}` : `${currentPath}/${folderName}`;
+
+            await SFTPUpload(sessionId, localPath, remotePath);
+            await loadDirectory(currentPath);
+        } catch (err: any) {
+            setError("上传文件夹失败: " + err.toString());
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleDownload = async (file: connection.FileInfo) => {
         if (!sessionId || file.isDir) return;
         try {
@@ -150,6 +169,13 @@ export default function SFTPBrowser({ sessionId }: SFTPBrowserProps) {
                         title="上传文件 (Local -> Remote)"
                     >
                         <Upload size={14} className="group-hover:scale-110 transition-transform" />
+                    </button>
+                    <button
+                        onClick={handleUploadFolder}
+                        className="p-1.5 hover:bg-[#388BFD]/10 text-[#388BFD] rounded transition-colors group"
+                        title="上传文件夹 (Local -> Remote)"
+                    >
+                        <Folder size={14} className="group-hover:scale-110 transition-transform" />
                     </button>
                     <button
                         onClick={() => loadDirectory(currentPath)}
