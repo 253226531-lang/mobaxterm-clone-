@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -122,7 +123,10 @@ func (a *App) logCommand(sessionID string, data string) {
 				builder.WriteString(s[:len(s)-1])
 			}
 		} else {
-			builder.WriteRune(r)
+			// Hard limit of 1MB buffer per session command being typed
+			if builder.Len() < 1024*1024 {
+				builder.WriteRune(r)
+			}
 		}
 	}
 }
@@ -279,6 +283,55 @@ func (a *App) SFTPDelete(sessionID string, path string, isDir bool) error {
 		return fmt.Errorf("连接管理器未初始化")
 	}
 	return a.manager.DeletePath(sessionID, path, isDir)
+}
+
+func (a *App) SFTPRename(sessionID string, oldPath, newPath string) error {
+	if a.manager == nil {
+		return fmt.Errorf("连接管理器未初始化")
+	}
+	return a.manager.Rename(sessionID, oldPath, newPath)
+}
+
+func (a *App) SFTPMkdir(sessionID string, path string) error {
+	if a.manager == nil {
+		return fmt.Errorf("连接管理器未初始化")
+	}
+	return a.manager.Mkdir(sessionID, path)
+}
+
+func (a *App) SyncTerminalPath(sessionID string, path string) error {
+	if a.manager == nil {
+		return fmt.Errorf("连接管理器未初始化")
+	}
+	// Execute cd command in the terminal
+	cdCmd := fmt.Sprintf("cd \"%s\"\r", path)
+	return a.manager.Write(sessionID, []byte(cdCmd))
+}
+
+func (a *App) SFTPChmod(sessionID string, path string, modeStr string) error {
+	if a.manager == nil {
+		return fmt.Errorf("连接管理器未初始化")
+	}
+	// Parse octal string like "755"
+	mode, err := strconv.ParseUint(modeStr, 8, 32)
+	if err != nil {
+		return fmt.Errorf("无效的权限格式: %w", err)
+	}
+	return a.manager.Chmod(sessionID, path, os.FileMode(mode))
+}
+
+func (a *App) SFTPDownloadDir(sessionID string, remoteDir, localDir string) error {
+	if a.manager == nil {
+		return fmt.Errorf("连接管理器未初始化")
+	}
+	return a.manager.DownloadDirectory(sessionID, remoteDir, localDir)
+}
+
+func (a *App) SFTPUploadDir(sessionID string, localDir, remoteDir string) error {
+	if a.manager == nil {
+		return fmt.Errorf("连接管理器未初始化")
+	}
+	return a.manager.UploadDirectory(sessionID, localDir, remoteDir)
 }
 
 // --- Serial Port Detection ---

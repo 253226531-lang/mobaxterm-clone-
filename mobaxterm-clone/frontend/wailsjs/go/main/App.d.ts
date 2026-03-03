@@ -46,13 +46,23 @@ export function OpenSaveDialog(arg1:string):Promise<string>;
 
 export function ResizeTerminal(arg1:string,arg2:number,arg3:number):Promise<void>;
 
+export function SFTPChmod(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function SFTPDelete(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
 export function SFTPDownload(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function SFTPDownloadDir(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function SFTPListDirectory(arg1:string,arg2:string):Promise<Array<connection.FileInfo>>;
 
+export function SFTPMkdir(arg1:string,arg2:string):Promise<void>;
+
+export function SFTPRename(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function SFTPUpload(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function SFTPUploadDir(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function SaveMacro(arg1:db.Macro):Promise<void>;
 
@@ -65,6 +75,8 @@ export function SearchKnowledgeBase(arg1:string):Promise<Array<db.KnowledgeEntry
 export function StartTFTPServer(arg1:string,arg2:number):Promise<void>;
 
 export function StopTFTPServer():Promise<void>;
+
+export function SyncTerminalPath(arg1:string,arg2:string):Promise<void>;
 
 export function UpdateKnowledgeEntry(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 

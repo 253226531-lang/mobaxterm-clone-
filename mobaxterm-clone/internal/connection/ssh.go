@@ -11,6 +11,8 @@ import (
 
 	"time"
 
+	"path/filepath"
+
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -26,6 +28,7 @@ type sshSession struct {
 	// stderr    io.Reader // Removed stderr as it's not in the provided SSHConnection struct
 	connected bool
 	onData    func(string)
+	stopKeep  chan struct{}
 }
 
 func (s *sshSession) Write(data []byte) (int, error) {
@@ -40,6 +43,7 @@ func (s *sshSession) Close() error {
 		s.sftp.Close()
 	}
 	if s.client != nil {
+		close(s.stopKeep) // Stop the keepalive goroutine
 		s.client.Close()
 	}
 	return nil
@@ -147,6 +151,7 @@ func (m *Manager) connectSSH(cfg config.Config) (Session, error) {
 		stdout:    stdout,
 		connected: true,
 		onData:    func(data string) { m.onData(cfg.ID, []byte(data)) },
+		stopKeep:  make(chan struct{}),
 	}
 
 	// Initialize SFTP Subsystem
@@ -165,11 +170,16 @@ func (m *Manager) connectSSH(cfg config.Config) (Session, error) {
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			// Send a global request to check if the connection is still alive
-			_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
-			if err != nil {
-				return // Connection lost
+		for {
+			select {
+			case <-ticker.C:
+				// Send a global request to check if the connection is still alive
+				_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
+				if err != nil {
+					return // Connection lost
+				}
+			case <-sshSess.stopKeep:
+				return // Session closed voluntarily
 			}
 		}
 	}()
@@ -177,7 +187,7 @@ func (m *Manager) connectSSH(cfg config.Config) (Session, error) {
 	return sshSess, nil
 }
 
-// DownloadFile downloads a file from the remote server to the local machine.
+// DownloadFile downloads a file from the remote server to the local machine with optimized buffer.
 func (s *sshSession) DownloadFile(remotePath, localPath string) error {
 	if s.sftp == nil {
 		return fmt.Errorf("SFTP客户端未初始化")
@@ -195,7 +205,9 @@ func (s *sshSession) DownloadFile(remotePath, localPath string) error {
 	}
 	defer localFile.Close()
 
-	_, err = io.Copy(localFile, remoteFile)
+	// Use a 1MB buffer for faster transfers
+	buf := make([]byte, 1024*1024)
+	_, err = io.CopyBuffer(localFile, remoteFile, buf)
 	if err != nil {
 		return fmt.Errorf("从远程复制文件到本地失败: %w", err)
 	}
@@ -203,7 +215,7 @@ func (s *sshSession) DownloadFile(remotePath, localPath string) error {
 	return nil
 }
 
-// UploadFile uploads a file from the local machine to the remote server.
+// UploadFile uploads a file from the local machine to the remote server with optimized buffer.
 func (s *sshSession) UploadFile(localPath, remotePath string) error {
 	if s.sftp == nil {
 		return fmt.Errorf("SFTP客户端未初始化")
@@ -221,7 +233,9 @@ func (s *sshSession) UploadFile(localPath, remotePath string) error {
 	}
 	defer remoteFile.Close()
 
-	_, err = io.Copy(remoteFile, localFile)
+	// Use a 1MB buffer for faster transfers
+	buf := make([]byte, 1024*1024)
+	_, err = io.CopyBuffer(remoteFile, localFile, buf)
 	if err != nil {
 		return fmt.Errorf("从本地复制文件到远程失败: %w", err)
 	}
@@ -239,4 +253,94 @@ func (s *sshSession) DeletePath(path string, isDir bool) error {
 		return s.sftp.RemoveDirectory(path)
 	}
 	return s.sftp.Remove(path)
+}
+
+// Rename renames a file or directory on the remote server.
+func (s *sshSession) Rename(oldPath, newPath string) error {
+	if s.sftp == nil {
+		return fmt.Errorf("SFTP客户端未初始化")
+	}
+	return s.sftp.Rename(oldPath, newPath)
+}
+
+// CreateDirectory creates a new directory on the remote server.
+func (s *sshSession) CreateDirectory(path string) error {
+	if s.sftp == nil {
+		return fmt.Errorf("SFTP客户端未初始化")
+	}
+	return s.sftp.Mkdir(path)
+}
+
+// Chmod changes the permissions of a file or directory on the remote server.
+func (s *sshSession) Chmod(path string, mode os.FileMode) error {
+	if s.sftp == nil {
+		return fmt.Errorf("SFTP客户端未初始化")
+	}
+	return s.sftp.Chmod(path, mode)
+}
+
+// DownloadDirectory recursively downloads a directory from remote to local.
+func (s *sshSession) DownloadDirectory(remoteDir, localDir string) error {
+	if s.sftp == nil {
+		return fmt.Errorf("SFTP客户端未初始化")
+	}
+
+	// Create local directory
+	if err := os.MkdirAll(localDir, 0755); err != nil {
+		return err
+	}
+
+	entries, err := s.sftp.ReadDir(remoteDir)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		remotePath := filepath.ToSlash(filepath.Join(remoteDir, entry.Name()))
+		localPath := filepath.Join(localDir, entry.Name())
+
+		if entry.IsDir() {
+			if err := s.DownloadDirectory(remotePath, localPath); err != nil {
+				return err
+			}
+		} else {
+			if err := s.DownloadFile(remotePath, localPath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// UploadDirectory recursively uploads a directory from local to remote.
+func (s *sshSession) UploadDirectory(localDir, remoteDir string) error {
+	if s.sftp == nil {
+		return fmt.Errorf("SFTP客户端未初始化")
+	}
+
+	// Create remote directory
+	if err := s.sftp.MkdirAll(remoteDir); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(localDir)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		localPath := filepath.Join(localDir, entry.Name())
+		remotePath := filepath.ToSlash(filepath.Join(remoteDir, entry.Name()))
+
+		if entry.IsDir() {
+			if err := s.UploadDirectory(localPath, remotePath); err != nil {
+				return err
+			}
+		} else {
+			if err := s.UploadFile(localPath, remotePath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

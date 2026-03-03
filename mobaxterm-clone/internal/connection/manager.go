@@ -3,6 +3,7 @@ package connection
 import (
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -138,24 +139,86 @@ func (m *Manager) CloseAll() {
 	}
 }
 
-// pump reads from the reader and sends it to the Wails frontend via the onData callback
+// pump reads from the reader and sends it to the Wails frontend via the onData callback.
+// It uses a separate goroutine for reading and a timer-based collector to batch data
+// efficiently without introducing noticeable lag for interactive typing.
 func (m *Manager) pump(sessionID string, r io.Reader) {
-	buf := make([]byte, 8192)
+	const (
+		bufSize      = 32768
+		flushTimeout = 15 * time.Millisecond
+	)
 
-	for {
-		n, err := r.Read(buf)
-		if n > 0 {
-			if m.onData != nil {
-				// 直接传递 buf[:n] 给负责派发的 onData。在 app.go 中它会被转为 string 进而做一次安全拷贝。
-				m.onData(sessionID, buf[:n])
+	dataChan := make(chan []byte, 128)
+	errChan := make(chan error, 1)
+
+	// Producer: Read from the source as fast as possible
+	go func() {
+		buf := make([]byte, bufSize)
+		for {
+			n, err := r.Read(buf)
+			if n > 0 {
+				// We must copy the data because we reuse the buffer
+				b := make([]byte, n)
+				copy(b, buf[:n])
+				dataChan <- b
+			}
+			if err != nil {
+				errChan <- err
+				close(dataChan)
+				return
 			}
 		}
-		if err != nil {
-			if err != io.EOF && m.onError != nil {
-				m.onError(sessionID, fmt.Errorf("连接异常中断: %w", err))
+	}()
+
+	// Consumer/Collector: Batch data and flush on timer or buffer full
+	var pending []byte
+	timer := time.NewTimer(flushTimeout)
+	if !timer.Stop() {
+		<-timer.C
+	}
+
+	for {
+		select {
+		case data, ok := <-dataChan:
+			if !ok {
+				// Channel closed, process remaining error
+				err := <-errChan
+				if len(pending) > 0 && m.onData != nil {
+					m.onData(sessionID, pending)
+				}
+				if err != io.EOF && m.onError != nil {
+					m.onError(sessionID, fmt.Errorf("连接异常中断: %w", err))
+				}
+				m.Close(sessionID)
+				return
 			}
-			m.Close(sessionID)
-			break
+
+			if len(pending) == 0 {
+				timer.Reset(flushTimeout)
+			}
+			pending = append(pending, data...)
+
+			// Limit max pending size to force flush
+			if len(pending) >= bufSize/2 {
+				if m.onData != nil {
+					m.onData(sessionID, pending)
+				}
+				pending = pending[:0]
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+			}
+
+		case <-timer.C:
+			if len(pending) > 0 {
+				if m.onData != nil {
+					m.onData(sessionID, pending)
+				}
+				pending = pending[:0]
+			}
 		}
 	}
 }
@@ -256,4 +319,89 @@ func (m *Manager) DeletePath(sessionID string, path string, isDir bool) error {
 	}
 
 	return sshSess.DeletePath(path, isDir)
+}
+
+func (m *Manager) Rename(sessionID string, oldPath, newPath string) error {
+	m.mu.RLock()
+	session, exists := m.sessions[sessionID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("会话未找到: %s", sessionID)
+	}
+
+	sshSess, ok := session.(*sshSession)
+	if !ok {
+		return fmt.Errorf("该会话不是SSH连接")
+	}
+
+	return sshSess.Rename(oldPath, newPath)
+}
+
+func (m *Manager) Mkdir(sessionID string, path string) error {
+	m.mu.RLock()
+	session, exists := m.sessions[sessionID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("会话未找到: %s", sessionID)
+	}
+
+	sshSess, ok := session.(*sshSession)
+	if !ok {
+		return fmt.Errorf("该会话不是SSH连接")
+	}
+
+	return sshSess.CreateDirectory(path)
+}
+
+func (m *Manager) Chmod(sessionID string, path string, mode os.FileMode) error {
+	m.mu.RLock()
+	session, exists := m.sessions[sessionID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("会话未找到: %s", sessionID)
+	}
+
+	sshSess, ok := session.(*sshSession)
+	if !ok {
+		return fmt.Errorf("该会话不是SSH连接")
+	}
+
+	return sshSess.Chmod(path, mode)
+}
+
+func (m *Manager) DownloadDirectory(sessionID string, remoteDir, localDir string) error {
+	m.mu.RLock()
+	session, exists := m.sessions[sessionID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("会话未找到: %s", sessionID)
+	}
+
+	sshSess, ok := session.(*sshSession)
+	if !ok {
+		return fmt.Errorf("该会话不是SSH连接")
+	}
+
+	return sshSess.DownloadDirectory(remoteDir, localDir)
+}
+
+func (m *Manager) UploadDirectory(sessionID string, localDir, remoteDir string) error {
+	m.mu.RLock()
+	session, exists := m.sessions[sessionID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("会话未找到: %s", sessionID)
+	}
+
+	sshSess, ok := session.(*sshSession)
+	if !ok {
+		return fmt.Errorf("该会话不是SSH连接")
+	}
+
+	return sshSess.UploadDirectory(localDir, remoteDir)
 }
