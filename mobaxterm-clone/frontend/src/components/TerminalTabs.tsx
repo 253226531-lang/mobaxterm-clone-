@@ -576,14 +576,24 @@ const XTermInstance = memo(({ sessionId, isActive }: { sessionId: string; isActi
         EventsOn(`request-save-log-${sessionId}`, onSaveLogRequest);
 
         return () => {
+            console.log(`[UI] Disposing terminal session ${sessionId}`);
             if (resizeTimeout) clearTimeout(resizeTimeout);
             if (resizeRafId !== null) cancelAnimationFrame(resizeRafId);
             resizeObserver.disconnect();
 
-            try { term.dispose(); } catch (e) { }
-
+            // Clear events FIRST to stop data flow
             EventsOff(`terminal-output-${sessionId}`);
             EventsOff(`request-save-log-${sessionId}`);
+
+            try { 
+                if (xtermRef.current) {
+                    xtermRef.current.dispose(); 
+                    xtermRef.current = null;
+                }
+            } catch (e) { 
+                console.error("XTerm dispose error:", e);
+            }
+
             terminalElement?.removeEventListener('contextmenu', handleContextMenu);
             terminalElement?.removeEventListener('paste', handlePaste as any);
         };

@@ -86,6 +86,10 @@ export function ResizeTerminal(arg1, arg2, arg3) {
   return window['go']['main']['App']['ResizeTerminal'](arg1, arg2, arg3);
 }
 
+export function SFTPChmod(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SFTPChmod'](arg1, arg2, arg3);
+}
+
 export function SFTPDelete(arg1, arg2, arg3) {
   return window['go']['main']['App']['SFTPDelete'](arg1, arg2, arg3);
 }
@@ -94,12 +98,28 @@ export function SFTPDownload(arg1, arg2, arg3) {
   return window['go']['main']['App']['SFTPDownload'](arg1, arg2, arg3);
 }
 
+export function SFTPDownloadDir(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SFTPDownloadDir'](arg1, arg2, arg3);
+}
+
 export function SFTPListDirectory(arg1, arg2) {
   return window['go']['main']['App']['SFTPListDirectory'](arg1, arg2);
 }
 
+export function SFTPMkdir(arg1, arg2) {
+  return window['go']['main']['App']['SFTPMkdir'](arg1, arg2);
+}
+
+export function SFTPRename(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SFTPRename'](arg1, arg2, arg3);
+}
+
 export function SFTPUpload(arg1, arg2, arg3) {
   return window['go']['main']['App']['SFTPUpload'](arg1, arg2, arg3);
+}
+
+export function SFTPUploadDir(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SFTPUploadDir'](arg1, arg2, arg3);
 }
 
 export function SaveMacro(arg1) {
@@ -124,6 +144,10 @@ export function StartTFTPServer(arg1, arg2) {
 
 export function StopTFTPServer() {
   return window['go']['main']['App']['StopTFTPServer']();
+}
+
+export function SyncTerminalPath(arg1, arg2) {
+  return window['go']['main']['App']['SyncTerminalPath'](arg1, arg2);
 }
 
 export function UpdateKnowledgeEntry(arg1, arg2, arg3, arg4, arg5) {
