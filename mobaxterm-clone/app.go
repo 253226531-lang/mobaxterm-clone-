@@ -598,3 +598,10 @@ func (a *App) ExecuteMacro(sessionId string, macroId string) error {
 
 	return nil
 }
+
+// OpenDirectoryDialog opens a directory picker dialog and returns the selected local path.
+func (a *App) OpenDirectoryDialog() (string, error) {
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择目录",
+	})
+}
