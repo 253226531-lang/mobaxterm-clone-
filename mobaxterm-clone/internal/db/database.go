@@ -56,10 +56,12 @@ func InitDB(dbPath string) (*Database, error) {
 	}
 
 	// 开启 WAL 模式和设置 busy_timeout 以优化高频并发写入 (特别是 command logs)
+	// 开启 foreign_keys 以支持宏 (Macro) 删除时的级联删除 (CASCADE)
 	_, err = db.Exec(`
 		PRAGMA journal_mode=WAL;
 		PRAGMA synchronous=NORMAL;
 		PRAGMA busy_timeout=5000;
+		PRAGMA foreign_keys=ON;
 	`)
 	if err != nil {
 		db.Close()

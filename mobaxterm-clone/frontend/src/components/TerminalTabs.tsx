@@ -38,6 +38,53 @@ const RISKY_PATTERNS = [
     /erase\s+startup-config/i
 ];
 
+// 预编译正则（模块级）
+// 1. 提示符：极致匹配，支持 [~Switch], <*Router>, [SwitchB] 等，甚至包含带空格的提示符
+const RE_PROMPT = /([<\[][~*# ]?[\w.-]{1,64}[>\]])/g;
+// 2. IP 地址：支持 IPv4, IPv6 (全写, 简写, 占位符 X:X::)
+const RE_IP = /\b((?:[0-9]{1,3}\.){3}[0-9]{1,3}|(?:[0-9a-fA-F]{1,4}:){1,7}[0-9a-fA-F]{1,4}|::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|X:X(?::[X:]+)*)\b/gi;
+// 3. 数通指令：将长指令和短语分开，确保即便只有部分匹配也能高亮
+const RE_NET_CMD = /\b(ip\s+route-static|ipv6\s+route-static|ip\s+address|ipv6\s+address|undo\s+shutdown|display|dis|interface|int|vlan|undo|shutdown|quit|return|save|system-view|sys|protocol|route-static|ospf|bgp|acl|policy-based-route|snmp-agent|user-interface|authentication-mode|ip|ipv6)\b/gi;
+const RE_IFACE = /(GigabitEthernet|Ten-GigabitEthernet|X-GigabitEthernet|Ethernet|Vlanif|LoopBack|Eth-Trunk|Serial|Atm|Tunnel|Bridge-if|M-Ethernet|XGE|GE|ME|Vlan-interface|Vlan-interface|VUI)\s*(\d+(?:\/\d+)*(?:\.\d+)?)/gi;
+const RE_UP = /\b(up|active|online|connected|passed|UP|Active|Online|Connected)\b/g;
+const RE_BAD = /\b(down|error|fail|failed|panic|critical|fatal|offline|shutdown|blocked|deny|failed|DOWN|Error|Fail|Failed|Shutdown)\b/g;
+const RE_WARN = /\b(warning|warn|alarm|alert|WARNING|Warn|Alarm|Alert)\b/g;
+
+// 对纯文本片段应用关键字高亮
+function applyKeyHighlights(s: string): string {
+    if (!s) return s;
+    let result = s;
+    // 配色方案：36(加粗青)-提示符 | 33(黄)-IP | 32(绿)-接口/成功 | 1;34(加粗蓝)-指令 | 1;31(加粗红)-失败
+    result = result.replace(RE_PROMPT, '\x1b[1;36m$1\x1b[0m');
+    result = result.replace(RE_IP, '\x1b[33m$1\x1b[0m');
+    result = result.replace(RE_IFACE, '\x1b[32m$1 $2\x1b[0m');
+    result = result.replace(RE_NET_CMD, '\x1b[1;34m$1\x1b[0m');
+    result = result.replace(RE_UP, '\x1b[1;32m$1\x1b[0m');
+    result = result.replace(RE_BAD, '\x1b[1;31m$1\x1b[0m');
+    result = result.replace(RE_WARN, '\x1b[33m$1\x1b[0m');
+    return result;
+}
+
+// 极其健壮的 ANSI 拆分正则：涵盖所有 CSI, OSC, G0/G1 charset 开头等
+const ANSI_SPLIT_RE = /(\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()]?[AB]|\x1b.)/g;
+
+// 关键字高亮过滤器
+function highlightFilter(text: string): string {
+    if (!text || text.length > 8192) return text;
+    // 如果没有转义码，直接整体尝试匹配
+    if (!text.includes('\x1b')) return applyKeyHighlights(text);
+
+    // 有转义码的情况：按块拆分，保护转义序列，只高亮文本
+    const parts = text.split(ANSI_SPLIT_RE);
+    for (let i = 0; i < parts.length; i++) {
+        // 偶数下标是文本段
+        if (i % 2 === 0 && parts[i] && parts[i].length > 0) {
+            parts[i] = applyKeyHighlights(parts[i]);
+        }
+    }
+    return parts.join('');
+}
+
 const TerminalContextMenu = memo(({ x, y, onClose, onClear, onReconnect, onPaste }: any) => {
     useEffect(() => {
         const handleClick = () => onClose();
@@ -408,6 +455,8 @@ const XTermInstance = memo(({ sessionId, isActive }: { sessionId: string; isActi
 
         const term = new XTerm({
             cursorBlink: true,
+            allowProposedApi: true,
+            scrollback: 5000,
             theme: {
                 background: '#0D1117',
                 foreground: '#C9D1D9',
@@ -470,51 +519,89 @@ const XTermInstance = memo(({ sessionId, isActive }: { sessionId: string; isActi
                 });
             }
         });
-
         resizeObserver.observe(terminalRef.current);
+
+        // 退格键处理：明确发送 \b (0x08 BS)，与 PTY VERASE=8 对齐
+        // 华为/中兴等网络设备的 VRP/VOS 使用 \b 作为退格信号
+        term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+            if (event.type === 'keydown' && event.key === 'Backspace'
+                && !event.ctrlKey && !event.altKey && !event.metaKey) {
+                WriteTerminal(sessionId, '\b').catch(() => { });
+                return false; // 阻止 xterm 的 onData 再次发送
+            }
+            return true;
+        });
 
         term.onData(data => {
             WriteTerminal(sessionId, data).catch(() => { });
         });
 
-        // 简易的正则是为了避免过度消耗性能。
-        // 对于数通/网络设备：匹配 <...>, [...], error, down, up, GigabitEthernet 等
-        // 对于Linux：匹配 root@..., warning, panic, fail 等
-        const highlightFilter = (text: string) => {
-            // 逃逸机制 1：如果块极其巨大（大吞吐量直刷日志如 cat/dmesg），直接跳过正则渲染
-            // 这种情况下人眼既看不清，强行高配会让 CPU 在执行多遍 replace 时烧毁。
-            if (text.length > 2048) {
-                return text;
+        // 智能流式写入策略：
+        // 1. 解决串口卡顿：小数据（≤32字节）如果是交互式回显，我们增加一个极短（16ms）的缓冲区
+        //    这是为了让正则表达式能够匹配到完整的单词（串口常逐字发送）。
+        // 2. 解决大流量性能：大数据走 rAF 批量批量合并写入。
+        let writeQueue: string[] = [];
+        let rafPending = false;
+        const flushQueue = () => {
+            if (writeQueue.length === 0) return;
+            const chunk = writeQueue.join('');
+            writeQueue = [];
+            rafPending = false;
+            term.write(highlightFilter(chunk));
+        };
+
+        let streamBuffer = '';
+        let streamTimer: any = null;
+        const flushStream = () => {
+            if (streamTimer) {
+                clearTimeout(streamTimer);
+                streamTimer = null;
             }
+            if (!streamBuffer) return;
+            const data = streamBuffer;
+            streamBuffer = '';
 
-            // 逃逸机制 2：如果文本已经包含了原生的 ANSI 转义码，尽量不干扰
-            if (text.includes('\x1b[')) {
-                return text;
+            // 数据下发到高亮渲染逻辑
+            if (data.length <= 128) {
+                term.write(highlightFilter(data));
+            } else {
+                writeQueue.push(data);
+                if (!rafPending) {
+                    rafPending = true;
+                    requestAnimationFrame(flushQueue);
+                }
             }
-
-            let colored = text;
-
-            // 数通设备 Prompt / 模式匹配, e.g., <HUAWEI>, [Quidway]
-            colored = colored.replace(/(<[^>]{1,32}>|\[[^\]]{1,32}\])/g, '\x1b[1;36m$1\x1b[0m');
-
-            // 常见数通接口匹配
-            colored = colored.replace(/(GigabitEthernet|Ten-GigabitEthernet|Ethernet|Vlanif|LoopBack)\s*(\d+(\/\d+)*)/ig, '\x1b[35m$1 $2\x1b[0m');
-
-            // 状态/严重关键词
-            colored = colored.replace(/\b(up)\b/ig, '\x1b[1;32m$1\x1b[0m');
-            // 只匹配简短的状态，防止全页扫描大段文本错乱
-            colored = colored.replace(/\b(down|error|fail|failed|panic|critical|fatal)\b/ig, '\x1b[1;31m$1\x1b[0m');
-            colored = colored.replace(/\b(warning|warn)\b/ig, '\x1b[1;33m$1\x1b[0m');
-
-            // Linux Prompt / 特权标识 (限制长度避免越界)
-            colored = colored.replace(/(\broot@[\w.-]{1,32})/g, '\x1b[1;31m$1\x1b[0m');
-
-            return colored;
         };
 
         const onDataHandler = (data: string) => {
-            const processedData = highlightFilter(data);
-            term.write(processedData);
+            // 如果收到换行、回车等基本控制符，立即冲刷之前积累的内容并同步输出
+            if (data.includes('\n') || data.includes('\r')) {
+                flushStream();
+                term.write(highlightFilter(data));
+                return;
+            }
+
+            // 收到含转义码的数据包（如光标移动），立即写，避免缓冲区乱序
+            if (data.includes('\x1b')) {
+                flushStream();
+                term.write(highlightFilter(data));
+                return;
+            }
+
+            streamBuffer += data;
+
+            // 针对串口碎片化回显的聚合策略：
+            // 如果遇到空格、命令行提示符结束符，稍微延迟 10ms 看看有没有后续（为了凑齐 ip route-static）
+            // 如果是普通字符，延迟 30ms 聚合整个单词
+            const lastChar = data[data.length - 1];
+            const isCritical = ' >]#$'.includes(lastChar);
+
+            if (streamBuffer.length > 512) {
+                flushStream();
+            } else {
+                if (streamTimer) clearTimeout(streamTimer);
+                streamTimer = setTimeout(flushStream, isCritical ? 10 : 30);
+            }
         };
 
         const onSaveLogRequest = () => {
@@ -585,12 +672,12 @@ const XTermInstance = memo(({ sessionId, isActive }: { sessionId: string; isActi
             EventsOff(`terminal-output-${sessionId}`);
             EventsOff(`request-save-log-${sessionId}`);
 
-            try { 
+            try {
                 if (xtermRef.current) {
-                    xtermRef.current.dispose(); 
+                    xtermRef.current.dispose();
                     xtermRef.current = null;
                 }
-            } catch (e) { 
+            } catch (e) {
                 console.error("XTerm dispose error:", e);
             }
 

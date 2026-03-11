@@ -175,12 +175,15 @@ func (a *App) ResizeTerminal(sessionID string, cols, rows int) error {
 	return a.manager.Resize(sessionID, cols, rows)
 }
 
-// CloseSession terminates an active session
+// CloseSession terminates an active session and removes its configuration
 func (a *App) CloseSession(sessionID string) error {
 	if a.manager == nil {
 		return fmt.Errorf("连接管理器未初始化")
 	}
-	return a.manager.Close(sessionID)
+	err := a.manager.Close(sessionID)
+	// 彻底清理配置映射，防止内存泄漏（仅在用户主动关闭标签页时执行）
+	a.manager.RemoveSession(sessionID)
+	return err
 }
 
 // GetSessionConfig returns the configuration for an active session

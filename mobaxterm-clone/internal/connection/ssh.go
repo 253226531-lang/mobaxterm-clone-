@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sync"
 
 	// Added time import as per instruction
 	"mobaxterm-clone/internal/config"
@@ -29,6 +30,7 @@ type sshSession struct {
 	connected bool
 	onData    func(string)
 	stopKeep  chan struct{}
+	closeOnce sync.Once
 }
 
 func (s *sshSession) Write(data []byte) (int, error) {
@@ -36,16 +38,18 @@ func (s *sshSession) Write(data []byte) (int, error) {
 }
 
 func (s *sshSession) Close() error {
-	if s.session != nil {
-		s.session.Close()
-	}
-	if s.sftp != nil { // Close sftp client
-		s.sftp.Close()
-	}
-	if s.client != nil {
-		close(s.stopKeep) // Stop the keepalive goroutine
-		s.client.Close()
-	}
+	s.closeOnce.Do(func() {
+		if s.session != nil {
+			s.session.Close()
+		}
+		if s.sftp != nil { // Close sftp client
+			s.sftp.Close()
+		}
+		if s.client != nil {
+			close(s.stopKeep) // Stop the keepalive goroutine
+			s.client.Close()
+		}
+	})
 	return nil
 }
 
@@ -124,9 +128,12 @@ func (m *Manager) connectSSH(cfg config.Config) (Session, error) {
 
 	// 6. Request a pseudo-terminal (PTY)
 	modes := ssh.TerminalModes{
-		ssh.ECHO:          1,     // enable echoing
-		ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
-		ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
+		ssh.ECHO:          1,      // enable echoing
+		ssh.VERASE:        8,      // BS (\b / 0x08) 匹配安忨/山鷹等设备退格键期望字符
+		ssh.ICRNL:         1,      // translate CR to NL on input
+		ssh.IUTF8:         1,      // enable UTF-8 mode
+		ssh.TTY_OP_ISPEED: 115200, // input speed
+		ssh.TTY_OP_OSPEED: 115200, // output speed
 	}
 
 	if err := session.RequestPty("xterm-256color", 24, 80, modes); err != nil {

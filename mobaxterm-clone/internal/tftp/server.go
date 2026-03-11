@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -104,6 +105,7 @@ func (s *Server) Stop() {
 	s.conn.Close()
 	s.isRunning = false
 	s.conn = nil
+	s.server = nil
 }
 
 // IsRunning returns the server status
@@ -125,8 +127,13 @@ func (s *Server) readHandler(filename string, rf io.ReaderFrom) error {
 	root := s.rootPath
 	s.mu.Unlock()
 
-	path := filepath.Join(root, filename)
-	file, err := os.Open(path)
+	// Path Traversal 缓解：确保解析后的绝对路径依然在 rootPath 下
+	cleanPath := filepath.Clean(filepath.Join(root, filename))
+	if !strings.HasPrefix(cleanPath, filepath.Clean(root)+string(os.PathSeparator)) && cleanPath != filepath.Clean(root) {
+		return fmt.Errorf("非法路径访问被拒绝 (读)")
+	}
+
+	file, err := os.Open(cleanPath)
 	if err != nil {
 		return err
 	}
@@ -160,8 +167,13 @@ func (s *Server) writeHandler(filename string, wt io.WriterTo) error {
 	root := s.rootPath
 	s.mu.Unlock()
 
-	path := filepath.Join(root, filename)
-	file, err := os.Create(path)
+	// Path Traversal 缓解：确保解析后的绝对路径依然在 rootPath 下
+	cleanPath := filepath.Clean(filepath.Join(root, filename))
+	if !strings.HasPrefix(cleanPath, filepath.Clean(root)+string(os.PathSeparator)) && cleanPath != filepath.Clean(root) {
+		return fmt.Errorf("非法路径访问被拒绝 (写)")
+	}
+
+	file, err := os.Create(cleanPath)
 	if err != nil {
 		return err
 	}

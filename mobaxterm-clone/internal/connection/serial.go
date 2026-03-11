@@ -3,6 +3,7 @@ package connection
 import (
 	"fmt"
 	"io"
+	"time"
 
 	"mobaxterm-clone/internal/config"
 
@@ -71,8 +72,16 @@ func (m *Manager) connectSerial(cfg config.Config) (Session, error) {
 	default:
 		mode.StopBits = serial.OneStopBit
 	}
-
-	port, err := serial.Open(cfg.ComPort, mode)
+	var port serial.Port
+	var err error
+	// Retry up to 5 times to allow the OS to release the COM port handle if it was just closed
+	for i := 0; i < 5; i++ {
+		port, err = serial.Open(cfg.ComPort, mode)
+		if err == nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("无法打开串口 %s: %w", cfg.ComPort, err)
 	}

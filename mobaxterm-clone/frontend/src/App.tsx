@@ -174,6 +174,8 @@ function App() {
         try {
             const config = await GetSessionConfig(sessionId);
             await CloseSession(sessionId);
+            // 给 OS 特别是 Windows 串口资源一点释放时间，防止 Access Denied
+            await new Promise(resolve => setTimeout(resolve, 500));
             const newSessionId = await Connect(config);
 
             setTabs(prev => prev.map(t =>

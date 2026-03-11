@@ -43,6 +43,21 @@ func NewManager(
 
 // Connect delegates to the specific protocol implementation
 func (m *Manager) Connect(cfg config.Config) (string, error) {
+	if cfg.ID == "" {
+		return "", fmt.Errorf("会话 ID 不能为空")
+	}
+
+	// 如果已存在同 ID 会话，先尝试强行关闭并清理，解决重连冲突
+	m.mu.Lock()
+	if old, exists := m.sessions[cfg.ID]; exists {
+		m.mu.Unlock()
+		old.Close()
+		m.mu.Lock()
+		delete(m.sessions, cfg.ID)
+		delete(m.configs, cfg.ID)
+	}
+	m.mu.Unlock()
+
 	var session Session
 	var err error
 
@@ -106,12 +121,13 @@ func (m *Manager) Close(sessionID string) error {
 	session, exists := m.sessions[sessionID]
 	if exists {
 		delete(m.sessions, sessionID)
-		delete(m.configs, sessionID)
+		// 注意：此处不再主动删除 configs 映射，以便前端在连接非正常中断后仍能通过 Reconnect 重新获取配置
 	}
 	m.mu.Unlock()
 
 	if !exists {
-		return fmt.Errorf("会话未找到: %s", sessionID)
+		// 已关闭，幂等返回
+		return nil
 	}
 
 	err := session.Close()
@@ -119,6 +135,13 @@ func (m *Manager) Close(sessionID string) error {
 		m.onClose(sessionID)
 	}
 	return err
+}
+
+// RemoveSession 彻底从管理器中注销会话，清理其配置信息
+func (m *Manager) RemoveSession(sessionID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.configs, sessionID)
 }
 
 // CloseAll terminates all active sessions safely (useful during app shutdown)
@@ -145,7 +168,7 @@ func (m *Manager) CloseAll() {
 func (m *Manager) pump(sessionID string, r io.Reader) {
 	const (
 		bufSize      = 32768
-		flushTimeout = 15 * time.Millisecond
+		flushTimeout = 4 * time.Millisecond // 串口回显延迟最小化；4ms 对 SSH 大流量仍有不错的批屏效果
 	)
 
 	dataChan := make(chan []byte, 128)
@@ -170,22 +193,40 @@ func (m *Manager) pump(sessionID string, r io.Reader) {
 		}
 	}()
 
-	// Consumer/Collector: Batch data and flush on timer or buffer full
+	// Consumer: 贪婪排空策略
+	// - 收到数据后立即尝试排空 dataChan（非阻塞）
+	// - 若没有更多数据（串口逐字符回显）→ 立即发送，无定时器等待
+	// - 若持续有大量数据（SSH 日志刷屏）→ 积累到足够大再发，减少重绘
 	var pending []byte
-	timer := time.NewTimer(flushTimeout)
+	// timer 仅作安全兜底，防止极少量数据永远等不到"排空"触发
+	const safetyTimeout = 4 * time.Millisecond
+	timer := time.NewTimer(safetyTimeout)
 	if !timer.Stop() {
 		<-timer.C
+	}
+
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		if m.onData != nil {
+			m.onData(sessionID, append([]byte(nil), pending...))
+		}
+		pending = pending[:0]
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
 	}
 
 	for {
 		select {
 		case data, ok := <-dataChan:
 			if !ok {
-				// Channel closed, process remaining error
 				err := <-errChan
-				if len(pending) > 0 && m.onData != nil {
-					m.onData(sessionID, pending)
-				}
+				flush()
 				if err != io.EOF && m.onError != nil {
 					m.onError(sessionID, fmt.Errorf("连接异常中断: %w", err))
 				}
@@ -193,32 +234,39 @@ func (m *Manager) pump(sessionID string, r io.Reader) {
 				return
 			}
 
-			if len(pending) == 0 {
-				timer.Reset(flushTimeout)
-			}
 			pending = append(pending, data...)
 
-			// Limit max pending size to force flush
-			if len(pending) >= bufSize/2 {
-				if m.onData != nil {
-					m.onData(sessionID, pending)
-				}
-				pending = pending[:0]
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
+			// 贪婪排空：非阻塞地把 dataChan 里已有的数据全部读出来合并
+			drained := false
+		drainLoop:
+			for len(pending) < bufSize/2 {
+				select {
+				case more, ok2 := <-dataChan:
+					if !ok2 {
+						break drainLoop
 					}
+					pending = append(pending, more...)
+					drained = true
+				default:
+					break drainLoop
+				}
+			}
+
+			if len(pending) >= bufSize/2 {
+				// 缓冲已满，强制立即发送（SSH 大流量场景）
+				flush()
+			} else if !drained {
+				// 没有更多数据可读（串口单字符回显/交互输入）→ 立即发送
+				flush()
+			} else {
+				// 批量数据仍在涌入，用安全定时器兜底
+				if len(pending) > 0 {
+					timer.Reset(safetyTimeout)
 				}
 			}
 
 		case <-timer.C:
-			if len(pending) > 0 {
-				if m.onData != nil {
-					m.onData(sessionID, pending)
-				}
-				pending = pending[:0]
-			}
+			flush()
 		}
 	}
 }
