@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"strconv"
@@ -24,12 +23,51 @@ import (
 	"golang.org/x/text/transform"
 )
 
+// CommandBuffer is a thread-safe wrapper around strings.Builder
+type CommandBuffer struct {
+	mu      sync.Mutex
+	builder strings.Builder
+}
+
+// SessionDecoder maintains state for streaming text decoding
+type SessionDecoder struct {
+	mu       sync.Mutex
+	decoder  transform.Transformer
+	leftover []byte
+}
+
+func (s *SessionDecoder) Decode(data []byte) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.leftover) > 0 {
+		data = append(s.leftover, data...)
+		s.leftover = nil
+	}
+
+	// 1 GBK char is max 2 bytes, which decodes to max 3 bytes in UTF-8.
+	// So len(data)*2 is generally enough to hold UTF-8 representation.
+	dst := make([]byte, len(data)*2)
+	nDst, nSrc, err := s.decoder.Transform(dst, data, false)
+
+	if err == transform.ErrShortSrc {
+		// Needs more bytes to complete a multi-byte character
+		s.leftover = append([]byte(nil), data[nSrc:]...)
+	} else if err != nil && err != transform.ErrShortDst {
+		// Other errors: drop leftover to avoid infinite stuck
+		s.leftover = nil
+	}
+
+	return string(dst[:nDst])
+}
+
 // App struct
 type App struct {
 	ctx        context.Context
 	manager    *connection.Manager
 	db         *db.Database
-	cmdBuffers sync.Map // Map[sessionID]*strings.Builder
+	cmdBuffers sync.Map // Map[sessionID]*CommandBuffer
+	decoders   sync.Map // Map[sessionID]*SessionDecoder
 	tftpServer *tftp.Server
 }
 
@@ -43,9 +81,12 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	// Initialize Database in the user data directory
-	// In a real app, you might want to put this in %APPDATA% or ~/.config
-	dbPath := filepath.Join(".", "data", "knowledge.db")
+	// Initialize Database in the user configuration directory
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		configDir = "."
+	}
+	dbPath := filepath.Join(configDir, "MobaXtermClone", "data", "knowledge.db")
 	database, err := db.InitDB(dbPath)
 	if err != nil {
 		fmt.Printf("数据库初始化失败: %v\n", err)
@@ -62,10 +103,11 @@ func (a *App) startup(ctx context.Context) {
 			// Handle encoding conversion if needed
 			if a.manager != nil {
 				if cfg, ok := a.manager.GetConfig(sessionID); ok && cfg.Encoding == "GBK" {
-					reader := transform.NewReader(strings.NewReader(string(data)), simplifiedchinese.GBK.NewDecoder())
-					if decoded, err := io.ReadAll(reader); err == nil {
-						output = string(decoded)
-					}
+					val, _ := a.decoders.LoadOrStore(sessionID, &SessionDecoder{
+						decoder: simplifiedchinese.GBK.NewDecoder(),
+					})
+					sd := val.(*SessionDecoder)
+					output = sd.Decode(data)
 				}
 			}
 
@@ -78,6 +120,7 @@ func (a *App) startup(ctx context.Context) {
 		// onClose callback
 		func(sessionID string) {
 			a.cmdBuffers.Delete(sessionID)
+			a.decoders.Delete(sessionID)
 			runtime.EventsEmit(a.ctx, "terminal-closed-"+sessionID)
 		},
 	)
@@ -102,12 +145,15 @@ func (a *App) logCommand(sessionID string, data string) {
 		return
 	}
 
-	val, _ := a.cmdBuffers.LoadOrStore(sessionID, &strings.Builder{})
-	builder := val.(*strings.Builder)
+	val, _ := a.cmdBuffers.LoadOrStore(sessionID, &CommandBuffer{})
+	cb := val.(*CommandBuffer)
+
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
 
 	for _, r := range data {
 		if r == '\r' || r == '\n' {
-			cmd := strings.TrimSpace(builder.String())
+			cmd := strings.TrimSpace(cb.builder.String())
 			if cmd != "" {
 				cfg, ok := a.manager.GetConfig(sessionID)
 				if ok {
@@ -115,17 +161,17 @@ func (a *App) logCommand(sessionID string, data string) {
 					go a.db.AddCommandLog(sessionID, cfg.Name, cfg.Host, cfg.Protocol, cmd)
 				}
 			}
-			builder.Reset()
+			cb.builder.Reset()
 		} else if r == '\b' || r == 127 { // Handle backspace
-			s := builder.String()
+			s := cb.builder.String()
 			if len(s) > 0 {
-				builder.Reset()
-				builder.WriteString(s[:len(s)-1])
+				cb.builder.Reset()
+				cb.builder.WriteString(s[:len(s)-1])
 			}
 		} else {
 			// Hard limit of 1MB buffer per session command being typed
-			if builder.Len() < 1024*1024 {
-				builder.WriteRune(r)
+			if cb.builder.Len() < 1024*1024 {
+				cb.builder.WriteRune(r)
 			}
 		}
 	}
@@ -307,7 +353,8 @@ func (a *App) SyncTerminalPath(sessionID string, path string) error {
 		return fmt.Errorf("连接管理器未初始化")
 	}
 	// Execute cd command in the terminal
-	cdCmd := fmt.Sprintf("cd \"%s\"\r", path)
+	escapedPath := strings.ReplaceAll(path, "\"", "\\\"")
+	cdCmd := fmt.Sprintf("cd \"%s\"\r", escapedPath)
 	return a.manager.Write(sessionID, []byte(cdCmd))
 }
 

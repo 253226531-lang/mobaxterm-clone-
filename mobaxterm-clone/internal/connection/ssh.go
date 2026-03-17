@@ -1,9 +1,11 @@
 package connection
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"sync"
 
@@ -16,6 +18,7 @@ import (
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // sshSession is our implementation of the Session interface for SSH
@@ -83,10 +86,45 @@ func (m *Manager) connectSSH(cfg config.Config) (Session, error) {
 	}
 
 	// 2. Setup SSH client configuration
+	configDir, _ := os.UserConfigDir()
+	if configDir == "" {
+		configDir = "."
+	}
+	knownHostsPath := filepath.Join(configDir, "MobaXtermClone", "known_hosts")
+	os.MkdirAll(filepath.Dir(knownHostsPath), 0755)
+	if _, err := os.Stat(knownHostsPath); os.IsNotExist(err) {
+		os.WriteFile(knownHostsPath, []byte(""), 0600)
+	}
+
+	hostKeyCallback, err := knownhosts.New(knownHostsPath)
+	if err != nil {
+		hostKeyCallback = ssh.InsecureIgnoreHostKey() // Fallback only if we can't read/create file
+	} else {
+		fallback := hostKeyCallback
+		hostKeyCallback = func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			err := fallback(hostname, remote, key)
+			if err != nil {
+				var keyErr *knownhosts.KeyError
+				if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
+					// KnownHosts doesn't have this key, trust on first use
+					f, openErr := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0600)
+					if openErr == nil {
+						defer f.Close()
+						line := knownhosts.Line([]string{knownhosts.Normalize(hostname)}, key)
+						f.WriteString(line + "\n")
+					}
+					return nil
+				}
+				return err
+			}
+			return nil
+		}
+	}
+
 	sshConfig := &ssh.ClientConfig{
 		User:            cfg.Username,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // For a real app, you should prompt to accept the host key
+		HostKeyCallback: hostKeyCallback,
 	}
 
 	address := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
