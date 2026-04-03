@@ -2,3 +2,6 @@ build/
 node_modules
 frontend/dist
 *.exe
+*.db
+*.db-shm
+*.db-wal
