@@ -27,11 +27,9 @@ type sshSession struct {
 	client  *ssh.Client
 	session *ssh.Session
 	sftp    *sftp.Client
-	stdin   io.WriteCloser
-	stdout  io.Reader
-	// stderr    io.Reader // Removed stderr as it's not in the provided SSHConnection struct
+	stdin     io.WriteCloser
+	stdout    io.Reader
 	connected bool
-	onData    func(string)
 	stopKeep  chan struct{}
 	closeOnce sync.Once
 }
@@ -67,6 +65,39 @@ func (s *sshSession) Resize(cols, rows int) error {
 func (m *Manager) connectSSH(cfg config.Config) (Session, error) {
 	// 1. Decrypt password if present
 	var authMethods []ssh.AuthMethod
+
+	// 1a. Load Private Key if present
+	if cfg.PrivateKey != "" {
+		decryptedKeyPath, err := config.DecryptPassword(cfg.PrivateKey)
+		if err != nil {
+			return nil, fmt.Errorf("解密私钥记录失败: %w", err)
+		}
+		
+		keyData, err := os.ReadFile(decryptedKeyPath)
+		if err != nil {
+			keyData = []byte(decryptedKeyPath) // Fallback: it might be the raw PEM content instead of path
+		}
+
+		var signer ssh.Signer
+		var parseErr error
+
+		if cfg.Password != "" {
+			decryptedPass, err := config.DecryptPassword(cfg.Password)
+			if err == nil {
+				signer, parseErr = ssh.ParsePrivateKeyWithPassphrase(keyData, []byte(decryptedPass))
+			}
+		} else {
+			signer, parseErr = ssh.ParsePrivateKey(keyData)
+		}
+
+		if parseErr == nil && signer != nil {
+			authMethods = append(authMethods, ssh.PublicKeys(signer))
+		} else {
+			log.Printf("SSH Key parse error: %v, falling back to password...", parseErr)
+		}
+	}
+
+	// 1b. Decrypt password if present
 	if cfg.Password != "" {
 		decrypted, err := config.DecryptPassword(cfg.Password)
 		if err != nil {
@@ -98,7 +129,16 @@ func (m *Manager) connectSSH(cfg config.Config) (Session, error) {
 
 	hostKeyCallback, err := knownhosts.New(knownHostsPath)
 	if err != nil {
-		hostKeyCallback = ssh.InsecureIgnoreHostKey() // Fallback only if we can't read/create file
+		// Fallback to strict manual prompt for all keys if known_hosts cannot be read
+		hostKeyCallback = func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			fingerprint := ssh.FingerprintSHA256(key)
+			if m.onHostKey != nil && m.onHostKey(hostname, fingerprint) {
+				// Don't try to write to known_hosts since it previously failed
+				return nil
+			}
+			log.Printf("SSH [SECURITY ERROR]: User rejected unknown host key for %s (%s) (Fallback Mode)", hostname, fingerprint)
+			return fmt.Errorf("host key rejected by user")
+		}
 	} else {
 		fallback := hostKeyCallback
 		hostKeyCallback = func(hostname string, remote net.Addr, key ssh.PublicKey) error {
@@ -106,15 +146,24 @@ func (m *Manager) connectSSH(cfg config.Config) (Session, error) {
 			if err != nil {
 				var keyErr *knownhosts.KeyError
 				if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
-					// KnownHosts doesn't have this key, trust on first use
-					f, openErr := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0600)
-					if openErr == nil {
-						defer f.Close()
-						line := knownhosts.Line([]string{knownhosts.Normalize(hostname)}, key)
-						f.WriteString(line + "\n")
+					fingerprint := ssh.FingerprintSHA256(key)
+
+					// Use the interactive Wails prompt instead of silent TOFU
+					if m.onHostKey != nil && m.onHostKey(hostname, fingerprint) {
+						f, openErr := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_WRONLY, 0600)
+						if openErr == nil {
+							defer f.Close()
+							line := knownhosts.Line([]string{knownhosts.Normalize(hostname)}, key)
+							f.WriteString(line + "\n")
+						}
+						return nil
 					}
-					return nil
+
+					log.Printf("SSH [SECURITY ERROR]: User rejected unknown host key for %s (%s)", hostname, fingerprint)
+					return fmt.Errorf("host key rejected by user")
 				}
+
+				log.Printf("SSH [SECURITY ERROR]: Host key mismatch for %s. MITM attack possible!", hostname)
 				return err
 			}
 			return nil
@@ -195,7 +244,6 @@ func (m *Manager) connectSSH(cfg config.Config) (Session, error) {
 		stdin:     stdin,
 		stdout:    stdout,
 		connected: true,
-		onData:    func(data string) { m.onData(cfg.ID, []byte(data)) },
 		stopKeep:  make(chan struct{}),
 	}
 
@@ -342,7 +390,12 @@ func (s *sshSession) DownloadDirectory(remoteDir, localDir string) error {
 
 	for _, entry := range entries {
 		remotePath := filepath.ToSlash(filepath.Join(remoteDir, entry.Name()))
-		localPath := filepath.Join(localDir, entry.Name())
+		// Fix: Prevent Server-Side Directory Traversal (Zip Slip equivalent) by forcing base name
+		safeLocalName := filepath.Base(entry.Name())
+		if safeLocalName == "/" || safeLocalName == "." || safeLocalName == ".." {
+			continue // Skip dangerous entries entirely
+		}
+		localPath := filepath.Join(localDir, safeLocalName)
 
 		if entry.IsDir() {
 			if err := s.DownloadDirectory(remotePath, localPath); err != nil {
@@ -375,7 +428,12 @@ func (s *sshSession) UploadDirectory(localDir, remoteDir string) error {
 
 	for _, entry := range entries {
 		localPath := filepath.Join(localDir, entry.Name())
-		remotePath := filepath.ToSlash(filepath.Join(remoteDir, entry.Name()))
+		// Fix: Prevent Client-Side Directory Traversal on upload
+		safeRemoteName := filepath.Base(entry.Name())
+		if safeRemoteName == "/" || safeRemoteName == "." || safeRemoteName == ".." {
+			continue // Skip dangerous entries
+		}
+		remotePath := filepath.ToSlash(filepath.Join(remoteDir, safeRemoteName))
 
 		if entry.IsDir() {
 			if err := s.UploadDirectory(localPath, remotePath); err != nil {

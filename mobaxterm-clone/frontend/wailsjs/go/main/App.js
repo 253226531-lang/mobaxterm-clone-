@@ -18,6 +18,10 @@ export function Connect(arg1) {
   return window['go']['main']['App']['Connect'](arg1);
 }
 
+export function DeleteExpectRule(arg1, arg2) {
+  return window['go']['main']['App']['DeleteExpectRule'](arg1, arg2);
+}
+
 export function DeleteKnowledgeEntry(arg1) {
   return window['go']['main']['App']['DeleteKnowledgeEntry'](arg1);
 }
@@ -28,6 +32,14 @@ export function DeleteMacro(arg1) {
 
 export function DeleteSession(arg1) {
   return window['go']['main']['App']['DeleteSession'](arg1);
+}
+
+export function DeleteSessionGroup(arg1) {
+  return window['go']['main']['App']['DeleteSessionGroup'](arg1);
+}
+
+export function DeleteTunnelConfig(arg1) {
+  return window['go']['main']['App']['DeleteTunnelConfig'](arg1);
 }
 
 export function ExecuteMacro(arg1, arg2) {
@@ -46,12 +58,24 @@ export function GetAllMacros() {
   return window['go']['main']['App']['GetAllMacros']();
 }
 
+export function GetAllSessionGroups() {
+  return window['go']['main']['App']['GetAllSessionGroups']();
+}
+
 export function GetAllSessions() {
   return window['go']['main']['App']['GetAllSessions']();
 }
 
+export function GetAllTunnels() {
+  return window['go']['main']['App']['GetAllTunnels']();
+}
+
 export function GetCommandLogs(arg1, arg2) {
   return window['go']['main']['App']['GetCommandLogs'](arg1, arg2);
+}
+
+export function GetExpectRules(arg1) {
+  return window['go']['main']['App']['GetExpectRules'](arg1);
 }
 
 export function GetSerialPorts() {
@@ -98,12 +122,12 @@ export function SFTPDelete(arg1, arg2, arg3) {
   return window['go']['main']['App']['SFTPDelete'](arg1, arg2, arg3);
 }
 
-export function SFTPDownload(arg1, arg2, arg3) {
-  return window['go']['main']['App']['SFTPDownload'](arg1, arg2, arg3);
+export function SFTPDownload(arg1, arg2) {
+  return window['go']['main']['App']['SFTPDownload'](arg1, arg2);
 }
 
-export function SFTPDownloadDir(arg1, arg2, arg3) {
-  return window['go']['main']['App']['SFTPDownloadDir'](arg1, arg2, arg3);
+export function SFTPDownloadDir(arg1, arg2) {
+  return window['go']['main']['App']['SFTPDownloadDir'](arg1, arg2);
 }
 
 export function SFTPListDirectory(arg1, arg2) {
@@ -118,12 +142,24 @@ export function SFTPRename(arg1, arg2, arg3) {
   return window['go']['main']['App']['SFTPRename'](arg1, arg2, arg3);
 }
 
-export function SFTPUpload(arg1, arg2, arg3) {
-  return window['go']['main']['App']['SFTPUpload'](arg1, arg2, arg3);
+export function SFTPUpload(arg1, arg2) {
+  return window['go']['main']['App']['SFTPUpload'](arg1, arg2);
 }
 
-export function SFTPUploadDir(arg1, arg2, arg3) {
-  return window['go']['main']['App']['SFTPUploadDir'](arg1, arg2, arg3);
+export function SFTPUploadDir(arg1, arg2) {
+  return window['go']['main']['App']['SFTPUploadDir'](arg1, arg2);
+}
+
+export function SFTPUploadDirDropped(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SFTPUploadDirDropped'](arg1, arg2, arg3);
+}
+
+export function SFTPUploadDropped(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SFTPUploadDropped'](arg1, arg2, arg3);
+}
+
+export function SaveExpectRule(arg1) {
+  return window['go']['main']['App']['SaveExpectRule'](arg1);
 }
 
 export function SaveMacro(arg1) {
@@ -134,16 +170,36 @@ export function SaveSession(arg1) {
   return window['go']['main']['App']['SaveSession'](arg1);
 }
 
+export function SaveSessionGroup(arg1) {
+  return window['go']['main']['App']['SaveSessionGroup'](arg1);
+}
+
 export function SaveTerminalLog(arg1) {
   return window['go']['main']['App']['SaveTerminalLog'](arg1);
+}
+
+export function SaveTunnelConfig(arg1) {
+  return window['go']['main']['App']['SaveTunnelConfig'](arg1);
 }
 
 export function SearchKnowledgeBase(arg1) {
   return window['go']['main']['App']['SearchKnowledgeBase'](arg1);
 }
 
+export function SelectPrivateKeyFile() {
+  return window['go']['main']['App']['SelectPrivateKeyFile']();
+}
+
+export function StartSSHTunnel(arg1) {
+  return window['go']['main']['App']['StartSSHTunnel'](arg1);
+}
+
 export function StartTFTPServer(arg1, arg2) {
   return window['go']['main']['App']['StartTFTPServer'](arg1, arg2);
+}
+
+export function StopSSHTunnel(arg1) {
+  return window['go']['main']['App']['StopSSHTunnel'](arg1);
 }
 
 export function StopTFTPServer() {
@@ -152,6 +208,14 @@ export function StopTFTPServer() {
 
 export function SyncTerminalPath(arg1, arg2) {
   return window['go']['main']['App']['SyncTerminalPath'](arg1, arg2);
+}
+
+export function TFTPClientDownload(arg1, arg2, arg3) {
+  return window['go']['main']['App']['TFTPClientDownload'](arg1, arg2, arg3);
+}
+
+export function TFTPClientUpload(arg1, arg2, arg3) {
+  return window['go']['main']['App']['TFTPClientUpload'](arg1, arg2, arg3);
 }
 
 export function UpdateKnowledgeEntry(arg1, arg2, arg3, arg4, arg5) {

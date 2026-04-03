@@ -1,7 +1,7 @@
 import { useForm } from 'react-hook-form';
 import { useState, useEffect } from 'react';
 import { X, Wifi, Monitor, Cable, Loader2 } from 'lucide-react';
-import { GetSerialPorts } from '../../wailsjs/go/main/App';
+import { GetSerialPorts, GetAllSessionGroups, SelectPrivateKeyFile } from '../../wailsjs/go/main/App';
 
 interface SessionModalProps {
     isOpen: boolean;
@@ -32,7 +32,9 @@ export default function SessionModal({ isOpen, onClose, onSave, initialData }: S
             parity: 'N',
             flowControl: 'None',
             description: '',
-            encoding: 'UTF-8'
+            encoding: 'UTF-8',
+            groupId: '',
+            privateKey: ''
         }
     });
 
@@ -54,10 +56,31 @@ export default function SessionModal({ isOpen, onClose, onSave, initialData }: S
                 parity: 'N',
                 flowControl: 'None',
                 description: '',
-                encoding: 'UTF-8'
+                encoding: 'UTF-8',
+                groupId: '',
+                privateKey: ''
             });
         }
     }, [isOpen, initialData, reset]);
+
+    const [groups, setGroups] = useState<any[]>([]);
+
+    useEffect(() => {
+        if (isOpen) {
+            GetAllSessionGroups().then((data: any) => setGroups(data || [])).catch(console.error);
+        }
+    }, [isOpen]);
+
+    const handleSelectKey = async () => {
+        try {
+            const keyPath = await SelectPrivateKeyFile();
+            if (keyPath) {
+                setValue('privateKey', keyPath);
+            }
+        } catch (e) {
+            console.error('选择私钥失败:', e);
+        }
+    };
 
     const selectedProtocol = watch('protocol');
     const [comPorts, setComPorts] = useState<string[]>([]);
@@ -125,11 +148,20 @@ export default function SessionModal({ isOpen, onClose, onSave, initialData }: S
                             ))}
                         </div>
 
-                        {/* Name & Encoding */}
+                        {/* Name, Group & Encoding */}
                         <div className="flex gap-3">
                             <div className="flex-[2]">
                                 <label className={labelClass}>会话名称</label>
                                 <input {...register('name')} className={inputClass} placeholder="例如: 核心路由器" required />
+                            </div>
+                            <div className="flex-1">
+                                <label className={labelClass}>所属分组</label>
+                                <select {...register('groupId')} className={inputClass}>
+                                    <option value="">[根目录]</option>
+                                    {groups.map((g: any) => (
+                                        <option key={g.id} value={g.id}>{g.name}</option>
+                                    ))}
+                                </select>
                             </div>
                             <div className="flex-1">
                                 <label className={labelClass}>终端编码</label>
@@ -234,6 +266,16 @@ export default function SessionModal({ isOpen, onClose, onSave, initialData }: S
                                 <div>
                                     <label className={labelClass}>密码</label>
                                     <input type="password" {...register('password')} className={inputClass} placeholder="留空则提示输入" />
+                                </div>
+                                <div>
+                                    <label className={labelClass}>非对称凭证 (私钥认证)</label>
+                                    <div className="flex gap-2">
+                                        <input type="text" {...register('privateKey')} className={inputClass} placeholder="可选：绑定证书如 .pem / id_rsa" readOnly />
+                                        <button type="button" onClick={handleSelectKey} className="px-3 shrink-0 rounded-lg text-[12px] font-medium text-[#8B949E] border border-[#30363D] hover:border-[#6E7681] hover:text-[#C9D1D9] transition-all duration-200">
+                                            选择私钥
+                                        </button>
+                                    </div>
+                                    <p className="text-[10px] text-[#6E7681] mt-1.5">* 如果证书受密码保护，请在上方【密码】栏填入该锁匙密码。</p>
                                 </div>
                             </>
                         )}

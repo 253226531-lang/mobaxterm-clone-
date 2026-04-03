@@ -2,6 +2,7 @@ package connection
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"mobaxterm-clone/internal/config"
@@ -11,20 +12,27 @@ import (
 
 // telnetSession is our implementation of the Session interface for Telnet
 type telnetSession struct {
-	ID     string
-	conn   *telnet.Conn
-	onData func(string)
+	ID        string
+	conn      *telnet.Conn
+	closeOnce sync.Once
 }
 
 func (s *telnetSession) Write(data []byte) (int, error) {
-	return s.conn.Write(data)
+	s.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	n, err := s.conn.Write(data)
+	s.conn.SetWriteDeadline(time.Time{}) // reset
+	return n, err
 }
 
+// M5 Fix: Use sync.Once to prevent double-close race
 func (s *telnetSession) Close() error {
-	if s.conn != nil {
-		return s.conn.Close()
-	}
-	return nil
+	var err error
+	s.closeOnce.Do(func() {
+		if s.conn != nil {
+			err = s.conn.Close()
+		}
+	})
+	return err
 }
 
 func (s *telnetSession) Resize(cols, rows int) error {
@@ -53,8 +61,9 @@ func (m *Manager) connectTelnet(cfg config.Config) (Session, error) {
 		return nil, fmt.Errorf("无法连接到 Telnet 服务器: %w", err)
 	}
 
-	// Basic telnet negotiation
 	conn.SetUnixWriteMode(true)
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 
 	// Notify server that we are willing to negotiate window size (NAWS)
 	// Sequence: IAC WILL NAWS (255 251 31)
@@ -63,13 +72,29 @@ func (m *Manager) connectTelnet(cfg config.Config) (Session, error) {
 	// Also suggest terminal type if asked (WILL TERMINAL-TYPE: 255 251 24)
 	conn.Write([]byte{255, 251, 24})
 
+	conn.SetReadDeadline(time.Time{})
+	conn.SetWriteDeadline(time.Time{})
+
 	session := &telnetSession{
 		ID:   cfg.ID,
 		conn: conn,
 	}
 
-	// Start reading from the connection
-	go m.pump(cfg.ID, conn)
+	// Start reading from the connection with an auto-resetting deadline wrapper
+	go m.pump(cfg.ID, &deadlineReader{conn: conn, timeout: 5 * time.Minute})
 
 	return session, nil
+}
+
+// deadlineReader wraps the telnet.Conn to reset the read deadline on every read.
+type deadlineReader struct {
+	conn    *telnet.Conn
+	timeout time.Duration
+}
+
+func (r *deadlineReader) Read(p []byte) (n int, err error) {
+	r.conn.SetReadDeadline(time.Now().Add(r.timeout))
+	n, err = r.conn.Read(p)
+	// Do not reset to zero immediately, keep the rolling deadline.
+	return n, err
 }

@@ -75,6 +75,17 @@ function App() {
         tabsRef.current = tabs;
     }, [tabs]);
 
+    // 防止用户拖进系统文件时，WebView 将整个应用变成文件下载面板/预览面板
+    useEffect(() => {
+        const preventDefault = (e: DragEvent) => e.preventDefault();
+        window.addEventListener('dragover', preventDefault, false);
+        // We do NOT prevent default on "drop", or Wails IDropTarget will think the event was processed by JS and swallow it!
+        // Instead we use --wails-drop-target CSS property to let Wails Native intercept the drop natively on Windows!
+        return () => {
+            window.removeEventListener('dragover', preventDefault, false);
+        };
+    }, []);
+
     const handleSessionSelect = (sessionId: string) => {
         setActiveSession(sessionId);
     };
@@ -202,7 +213,10 @@ function App() {
         <div
             ref={containerRef}
             className={`flex h-screen w-screen overflow-hidden bg-[#0D1117] text-[#C9D1D9] font-inter ${isResizing ? 'cursor-col-resize select-none' : ''}`}
-            style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
+            style={{ 
+                '--sidebar-width': `${sidebarWidth}px`, 
+                '--wails-drop-target': 'drop' 
+            } as React.CSSProperties}
         >
             <Sidebar
                 onSessionSelect={handleSessionSelect}

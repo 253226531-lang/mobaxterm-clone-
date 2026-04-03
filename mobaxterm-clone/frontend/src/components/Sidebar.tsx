@@ -1,12 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Terminal, FolderGit2, BookOpen, Plus, Settings2, Trash2, Wifi, Cable, History, Globe } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Terminal, FolderGit2, BookOpen, Plus, Settings2, Trash2, Wifi, Cable, History, Globe, FolderPlus, Folder, FolderOpen } from 'lucide-react';
 import { Tab } from '../types';
 import SFTPBrowser from './SFTPBrowser';
 import KBSearch from './KBSearch';
 import HistoryLogs from './HistoryLogs';
 import TFTPServer from './TFTPServer';
 import MacroManager from './MacroManager';
-import { GetAllSessions, DeleteSession } from '../../wailsjs/go/main/App';
+import { GetAllSessions, DeleteSession, GetAllSessionGroups, SaveSessionGroup } from '../../wailsjs/go/main/App';
 
 interface SavedSession {
     id: string;
@@ -15,6 +15,13 @@ interface SavedSession {
     host?: string;
     port?: number;
     comPort?: string;
+    groupId?: string;
+}
+
+interface SavedGroup {
+    id: string;
+    parentId?: string;
+    name: string;
 }
 
 interface SidebarProps {
@@ -51,28 +58,62 @@ export default function Sidebar({
 }: SidebarProps) {
     const [activeTab, setActiveTab] = useState<'sessions' | 'sftp' | 'kb' | 'macros' | 'logs' | 'tftp'>('sessions');
     const [sessions, setSessions] = useState<SavedSession[]>([]);
+    const [groups, setGroups] = useState<SavedGroup[]>([]);
+    const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
-    const loadSessions = useCallback(async () => {
+    const loadData = useCallback(async () => {
         try {
-            const data = await GetAllSessions();
-            setSessions(data || []);
+            const [sessData, groupData] = await Promise.all([
+                GetAllSessions(),
+                GetAllSessionGroups()
+            ]);
+            setSessions(sessData || []);
+            setGroups(groupData as any || []);
         } catch (e) {
-            console.error('加载会话列表失败:', e);
+            console.error('加载会话/分组数据失败:', e);
         }
     }, []);
 
     useEffect(() => {
-        loadSessions();
-    }, [loadSessions, refreshTrigger]);
+        loadData();
+    }, [loadData, refreshTrigger]);
 
-    const handleDelete = async (e: React.MouseEvent, id: string) => {
-        e.stopPropagation();
+    const handleCreateGroup = async () => {
+        const title = window.prompt('请输入新建的文件夹名称:');
+        if (!title) return;
+        try {
+            await SaveSessionGroup({
+                id: `group-${Date.now()}`,
+                name: title,
+                parentId: '',
+                createdAt: ''
+            });
+            loadData();
+        } catch (e) {
+            alert('创建失败: ' + e);
+        }
+    };
+
+    const toggleGroup = (groupId: string) => {
+        setExpandedGroups(prev => ({
+            ...prev,
+            [groupId]: !prev[groupId]
+        }));
+    };
+
+    // E2 Fix: Use stable function references to avoid closure traps
+    const handleDeleteSessionRef = React.useRef(async (id: string) => {
         try {
             await DeleteSession(id);
-            loadSessions();
+            loadData();
         } catch (e) {
             console.error('删除会话失败:', e);
         }
+    });
+
+    const handleDelete = (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
+        handleDeleteSessionRef.current(id);
     };
 
     const getProtocolIcon = (protocol: string) => {
@@ -114,21 +155,90 @@ export default function Sidebar({
                     <div className="animate-fade-in">
                         <div className="flex justify-between items-center mb-3">
                             <h3 className="text-[11px] font-semibold text-[#8B949E] uppercase tracking-wider">已保存会话</h3>
-                            <button
-                                onClick={onNewSession}
-                                className="flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-md transition-all duration-200 accent-gradient text-white hover:opacity-90 shadow-sm"
-                            >
-                                <Plus size={12} />
-                                新建
-                            </button>
+                            <div className="flex gap-1.5">
+                                <button
+                                    onClick={handleCreateGroup}
+                                    title="新建目录"
+                                    className="p-1 rounded text-[#8B949E] hover:text-white hover:bg-[#30363D] transition-all duration-200"
+                                >
+                                    <FolderPlus size={14} />
+                                </button>
+                                <button
+                                    onClick={onNewSession}
+                                    title="新建会话"
+                                    className="flex items-center justify-center p-1 rounded transition-all duration-200 accent-gradient text-white hover:opacity-90 shadow-sm"
+                                >
+                                    <Plus size={14} />
+                                </button>
+                            </div>
                         </div>
                         <div className="space-y-1">
-                            {sessions.length === 0 && (
+                            {sessions.length === 0 && groups.length === 0 && (
                                 <div className="text-center text-[11px] text-[#484F58] py-6">
                                     暂无保存的会话
                                 </div>
                             )}
-                            {sessions.map(session => (
+
+                            {/* Render Groups Level */}
+                            {groups.map(group => {
+                                const groupSessions = sessions.filter(s => s.groupId === group.id);
+                                const isExpanded = expandedGroups[group.id];
+
+                                return (
+                                    <div key={group.id} className="mb-1">
+                                        <div 
+                                            onClick={() => toggleGroup(group.id)}
+                                            className="px-2 py-1.5 rounded-lg cursor-pointer hover:bg-[#1C2128] flex items-center gap-2 text-[#8B949E] hover:text-[#C9D1D9] transition-all duration-200 select-none"
+                                        >
+                                            {isExpanded ? <FolderOpen size={14} className="text-[#D29922]" /> : <Folder size={14} className="text-[#D29922]" />}
+                                            <span className="text-[12px] font-medium truncate flex-1">{group.name}</span>
+                                        </div>
+                                        
+                                        {isExpanded && (
+                                            <div className="ml-4 pl-2 border-l border-[#30363D] flex flex-col gap-0.5 mt-1">
+                                                {groupSessions.length === 0 ? (
+                                                    <span className="text-[10px] text-[#484F58] py-1 pl-2">空目录</span>
+                                                ) : (
+                                                    groupSessions.map(session => (
+                                                        <div
+                                                            key={session.id}
+                                                            className="px-2 py-2 text-sm rounded-lg cursor-pointer hover:bg-[#161B22] flex items-center gap-2.5 group transition-all duration-200 border border-transparent hover:border-[#30363D]"
+                                                            onClick={() => onConnectSaved(session)}
+                                                        >
+                                                            <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ background: session.protocol === 'serial' ? 'rgba(210,153,34,0.1)' : 'rgba(56,139,253,0.1)' }}>
+                                                                {getProtocolIcon(session.protocol)}
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <span className="block text-[12px] font-medium text-[#C9D1D9] truncate">{session.name}</span>
+                                                                <span className="block text-[9px] text-[#6E7681]">{getProtocolLabel(session)}</span>
+                                                            </div>
+                                                            <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 shrink-0">
+                                                                <button
+                                                                    onClick={(e) => { e.stopPropagation(); onEditSession(session); }}
+                                                                    className="p-1 rounded text-[#484F58] hover:text-[#388BFD]"
+                                                                    title="编辑会话"
+                                                                >
+                                                                    <Settings2 size={12} />
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => handleDelete(e, session.id)}
+                                                                    className="p-1 rounded text-[#484F58] hover:text-[#F85149]"
+                                                                    title="删除会话"
+                                                                >
+                                                                    <Trash2 size={12} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+
+                            {/* Render Root Level Sessions */}
+                            {sessions.filter(s => !s.groupId).map(session => (
                                 <div
                                     key={session.id}
                                     className="px-3 py-2.5 text-sm rounded-lg cursor-pointer hover:bg-[#161B22] flex items-center gap-2.5 group transition-all duration-200 border border-transparent hover:border-[#30363D]"

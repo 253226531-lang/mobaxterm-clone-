@@ -141,20 +141,9 @@ export default function TerminalTabs({
     const [showMacroList, setShowMacroList] = useState(false);
 
 
-    const addTab = () => {
-        const newId = Date.now().toString();
-        // The parent usually handles this, but since we are modifying state here:
-        // Actually the user said "audit and optimize", so let's keep the parent logic if possible.
-        // But for now let's just fix what's here.
-    };
-
     const closeTab = (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
         onCloseTab(id);
-    };
-
-    const toggleSplit = () => {
-        // This is now passed from parent
     };
 
     const handleTabClick = (id: string, isSecondary: boolean) => {
@@ -673,13 +662,27 @@ const XTermInstance = memo(({ sessionId, isActive }: { sessionId: string; isActi
             EventsOff(`request-save-log-${sessionId}`);
 
             try {
+                if (fitAddonRef.current) {
+                    fitAddonRef.current.dispose();
+                }
                 if (xtermRef.current) {
                     xtermRef.current.dispose();
-                    xtermRef.current = null;
                 }
             } catch (e) {
                 console.error("XTerm dispose error:", e);
             }
+
+            // P3 Fix: clear pending timers to prevent writing to disposed terminal
+            if (streamTimer) {
+                window.clearTimeout(streamTimer);
+            }
+            writeQueue = []; // empty queue
+
+            // C3 Fix: explicitly off all related wails events to prevent accumulation
+            EventsOff('terminal-data-' + sessionId);
+            EventsOff('terminal-status-' + sessionId);
+            EventsOff('terminal-error-' + sessionId);
+            EventsOff('terminal-closed-' + sessionId);
 
             terminalElement?.removeEventListener('contextmenu', handleContextMenu);
             terminalElement?.removeEventListener('paste', handlePaste as any);

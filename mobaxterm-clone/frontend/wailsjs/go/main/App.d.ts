@@ -12,11 +12,17 @@ export function CloseSession(arg1:string):Promise<void>;
 
 export function Connect(arg1:config.Config):Promise<string>;
 
+export function DeleteExpectRule(arg1:string,arg2:string):Promise<void>;
+
 export function DeleteKnowledgeEntry(arg1:number):Promise<void>;
 
 export function DeleteMacro(arg1:string):Promise<void>;
 
 export function DeleteSession(arg1:string):Promise<void>;
+
+export function DeleteSessionGroup(arg1:string):Promise<void>;
+
+export function DeleteTunnelConfig(arg1:string):Promise<void>;
 
 export function ExecuteMacro(arg1:string,arg2:string):Promise<void>;
 
@@ -26,9 +32,15 @@ export function GetAllKnowledgeEntries():Promise<Array<db.KnowledgeEntry>>;
 
 export function GetAllMacros():Promise<Array<db.Macro>>;
 
+export function GetAllSessionGroups():Promise<Array<db.SessionGroup>>;
+
 export function GetAllSessions():Promise<Array<config.Config>>;
 
+export function GetAllTunnels():Promise<Array<db.DBTunnelConfig>>;
+
 export function GetCommandLogs(arg1:string,arg2:number):Promise<Array<db.CommandLog>>;
+
+export function GetExpectRules(arg1:string):Promise<Array<db.DBExpectRule>>;
 
 export function GetSerialPorts():Promise<Array<string>>;
 
@@ -52,9 +64,9 @@ export function SFTPChmod(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function SFTPDelete(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
-export function SFTPDownload(arg1:string,arg2:string,arg3:string):Promise<void>;
+export function SFTPDownload(arg1:string,arg2:string):Promise<void>;
 
-export function SFTPDownloadDir(arg1:string,arg2:string,arg3:string):Promise<void>;
+export function SFTPDownloadDir(arg1:string,arg2:string):Promise<void>;
 
 export function SFTPListDirectory(arg1:string,arg2:string):Promise<Array<connection.FileInfo>>;
 
@@ -62,23 +74,43 @@ export function SFTPMkdir(arg1:string,arg2:string):Promise<void>;
 
 export function SFTPRename(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function SFTPUpload(arg1:string,arg2:string,arg3:string):Promise<void>;
+export function SFTPUpload(arg1:string,arg2:string):Promise<void>;
 
-export function SFTPUploadDir(arg1:string,arg2:string,arg3:string):Promise<void>;
+export function SFTPUploadDir(arg1:string,arg2:string):Promise<void>;
+
+export function SFTPUploadDirDropped(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function SFTPUploadDropped(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function SaveExpectRule(arg1:db.DBExpectRule):Promise<void>;
 
 export function SaveMacro(arg1:db.Macro):Promise<void>;
 
 export function SaveSession(arg1:config.Config):Promise<void>;
 
+export function SaveSessionGroup(arg1:db.SessionGroup):Promise<void>;
+
 export function SaveTerminalLog(arg1:string):Promise<void>;
+
+export function SaveTunnelConfig(arg1:db.DBTunnelConfig):Promise<void>;
 
 export function SearchKnowledgeBase(arg1:string):Promise<Array<db.KnowledgeEntry>>;
 
+export function SelectPrivateKeyFile():Promise<string>;
+
+export function StartSSHTunnel(arg1:connection.TunnelConfig):Promise<void>;
+
 export function StartTFTPServer(arg1:string,arg2:number):Promise<void>;
+
+export function StopSSHTunnel(arg1:string):Promise<void>;
 
 export function StopTFTPServer():Promise<void>;
 
 export function SyncTerminalPath(arg1:string,arg2:string):Promise<void>;
+
+export function TFTPClientDownload(arg1:string,arg2:number,arg3:string):Promise<void>;
+
+export function TFTPClientUpload(arg1:string,arg2:number,arg3:string):Promise<void>;
 
 export function UpdateKnowledgeEntry(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 

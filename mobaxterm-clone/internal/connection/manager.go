@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -19,25 +20,30 @@ type Session interface {
 
 // Manager handles active connections
 type Manager struct {
-	sessions map[string]Session
-	configs  map[string]config.Config
-	mu       sync.RWMutex
+	sessions      map[string]Session
+	configs       map[string]config.Config
+	expectEngines map[string]*ExpectEngine
+	mu            sync.RWMutex
 	onData   func(sessionID string, data []byte)
-	onError  func(sessionID string, err error)
-	onClose  func(sessionID string)
+	onError   func(sessionID string, err error)
+	onClose   func(sessionID string)
+	onHostKey func(hostname, fingerprint string) bool
 }
 
 func NewManager(
 	onData func(sessionID string, data []byte),
 	onError func(sessionID string, err error),
 	onClose func(sessionID string),
+	onHostKey func(hostname, fingerprint string) bool,
 ) *Manager {
 	return &Manager{
-		sessions: make(map[string]Session),
-		configs:  make(map[string]config.Config),
-		onData:   onData,
-		onError:  onError,
-		onClose:  onClose,
+		sessions:      make(map[string]Session),
+		configs:       make(map[string]config.Config),
+		expectEngines: make(map[string]*ExpectEngine),
+		onData:        onData,
+		onError:   onError,
+		onClose:   onClose,
+		onHostKey: onHostKey,
 	}
 }
 
@@ -48,15 +54,20 @@ func (m *Manager) Connect(cfg config.Config) (string, error) {
 	}
 
 	// 如果已存在同 ID 会话，先尝试强行关闭并清理，解决重连冲突
+	var oldSession Session
 	m.mu.Lock()
 	if old, exists := m.sessions[cfg.ID]; exists {
-		m.mu.Unlock()
-		old.Close()
-		m.mu.Lock()
+		oldSession = old
 		delete(m.sessions, cfg.ID)
 		delete(m.configs, cfg.ID)
 	}
 	m.mu.Unlock()
+
+	// C1 Fix: Close old session OUTSIDE of the mutex to prevent deadlocks and races
+	// where another Connect call sneaks in between Unlock and Lock.
+	if oldSession != nil {
+		oldSession.Close()
+	}
 
 	var session Session
 	var err error
@@ -79,6 +90,11 @@ func (m *Manager) Connect(cfg config.Config) (string, error) {
 	m.mu.Lock()
 	m.sessions[cfg.ID] = session
 	m.configs[cfg.ID] = cfg
+	// Attach expect engine tailored with a callback back into the particular session wrapper
+	m.expectEngines[cfg.ID] = NewExpectEngine(func(data []byte) error {
+		_, writeErr := session.Write(data)
+		return writeErr
+	})
 	m.mu.Unlock()
 
 	return cfg.ID, nil
@@ -121,7 +137,19 @@ func (m *Manager) Close(sessionID string) error {
 	session, exists := m.sessions[sessionID]
 	if exists {
 		delete(m.sessions, sessionID)
-		// 注意：此处不再主动删除 configs 映射，以便前端在连接非正常中断后仍能通过 Reconnect 重新获取配置
+		delete(m.expectEngines, sessionID)
+
+		// A2 Fix: Prevent memory accumulation by setting a delayed cleanup for configs.
+		// Keep it temporarily so frontend can trigger "Reconnect" using the same config shortly after a disconnect.
+		// If not removed via `RemoveSession` or reconnected within 1 hour, clean it up.
+		time.AfterFunc(1*time.Hour, func() {
+			m.mu.Lock()
+			// Only delete if it hasn't been reconnected (reconnected means it would be in m.sessions again)
+			if _, isActive := m.sessions[sessionID]; !isActive {
+				delete(m.configs, sessionID)
+			}
+			m.mu.Unlock()
+		})
 	}
 	m.mu.Unlock()
 
@@ -152,6 +180,7 @@ func (m *Manager) CloseAll() {
 		sessionsToClose = append(sessionsToClose, sess)
 		delete(m.sessions, id)
 		delete(m.configs, id)
+		delete(m.expectEngines, id)
 	}
 	m.mu.Unlock()
 
@@ -166,9 +195,14 @@ func (m *Manager) CloseAll() {
 // It uses a separate goroutine for reading and a timer-based collector to batch data
 // efficiently without introducing noticeable lag for interactive typing.
 func (m *Manager) pump(sessionID string, r io.Reader) {
+	// Let's create a context to properly close the producer goroutine if
+	// the consumer gives up or connection closes (Fix C2)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	const (
 		bufSize      = 32768
-		flushTimeout = 4 * time.Millisecond // 串口回显延迟最小化；4ms 对 SSH 大流量仍有不错的批屏效果
+		flushTimeout = 4 * time.Millisecond // minimum latency for serial echo; good batching for SSH
 	)
 
 	dataChan := make(chan []byte, 128)
@@ -183,10 +217,17 @@ func (m *Manager) pump(sessionID string, r io.Reader) {
 				// We must copy the data because we reuse the buffer
 				b := make([]byte, n)
 				copy(b, buf[:n])
-				dataChan <- b
+				select {
+				case dataChan <- b:
+				case <-ctx.Done(): // Consumer went away
+					return
+				}
 			}
 			if err != nil {
-				errChan <- err
+				select {
+				case errChan <- err:
+				case <-ctx.Done():
+				}
 				close(dataChan)
 				return
 			}
@@ -236,6 +277,15 @@ func (m *Manager) pump(sessionID string, r io.Reader) {
 
 			pending = append(pending, data...)
 
+			// ---- Inject to ExpectEngine to parse regex and do actions dynamically ----
+			m.mu.RLock()
+			engine, engineExists := m.expectEngines[sessionID]
+			m.mu.RUnlock()
+			if engineExists && engine != nil {
+				engine.Process(data)
+			}
+			// -------------------------------------------------------------------------
+
 			// 贪婪排空：非阻塞地把 dataChan 里已有的数据全部读出来合并
 			drained := false
 		drainLoop:
@@ -269,6 +319,18 @@ func (m *Manager) pump(sessionID string, r io.Reader) {
 			flush()
 		}
 	}
+}
+
+// Add/Set new Expect Rules to an active session
+func (m *Manager) SetExpectRules(sessionID string, rules []ExpectRule) error {
+	m.mu.RLock()
+	engine, exists := m.expectEngines[sessionID]
+	m.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("会话不存在，无法挂载规则")
+	}
+	engine.SetRules(rules)
+	return nil
 }
 
 // --- SFTP Bindings ---

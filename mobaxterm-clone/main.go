@@ -37,6 +37,10 @@ func main() {
 		StartHidden:       false,
 		HideWindowOnClose: false,
 		BackgroundColour:  &options.RGBA{R: 27, G: 38, B: 54, A: 255},
+		DragAndDrop: &options.DragAndDrop{
+			EnableFileDrop:  true,
+			CSSDropProperty: "--wails-drop-target",
+		},
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

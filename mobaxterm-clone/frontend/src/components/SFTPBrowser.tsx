@@ -2,9 +2,10 @@ import { useState, useEffect, useMemo, Fragment, useRef } from 'react';
 import {
     SFTPListDirectory, SFTPDownload, SFTPUpload, SFTPDelete, SFTPRename,
     SFTPMkdir, SyncTerminalPath, SFTPChmod, SFTPDownloadDir, SFTPUploadDir,
-    OpenFileDialog, OpenSaveDialog, OpenDirectoryDialog
+    SFTPUploadDropped, SFTPUploadDirDropped
 } from '../../wailsjs/go/main/App';
 import { connection } from '../../wailsjs/go/models';
+import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime';
 import {
     Folder, File, ArrowUpCircle, ArrowDownCircle, RefreshCw, ChevronUp,
     Download, Upload, Trash2, Edit3, FolderPlus, Search, Terminal,
@@ -92,6 +93,51 @@ export default function SFTPBrowser({ sessionId }: SFTPBrowserProps) {
         }
     }, [sessionId]);
 
+    const currentPathRef = useRef(currentPath);
+    useEffect(() => {
+        currentPathRef.current = currentPath;
+    }, [currentPath]);
+
+    useEffect(() => {
+        if (!sessionId) return;
+        
+        const handleFileDrop = async (x: number, y: number, paths: string[]) => {
+             if (!paths || paths.length === 0) return;
+             
+             // Check if we are hovered over the window, Wails gives coordinates but it triggers anywhere that has the CSS Drop Property.
+             showStatus(`开始批量上传 ${paths.length} 个项目...`, 'info', 0);
+             setLoading(true);
+
+             try {
+                  for (const localPath of paths) {
+                      const fileName = localPath.split(/[\\/]/).pop();
+                      const cp = currentPathRef.current;
+                      const remotePath = cp === '/' ? `/${fileName}` : `${cp}/${fileName}`;
+                      
+                      // Assume it's a file for drag and drop. 
+                      // If the user drops a folder, SFTPUploadDropped will error out natively unless handled in backend.
+                      try {
+                          await SFTPUploadDropped(sessionId, localPath, remotePath);
+                      } catch (err: any) {
+                          console.error('Drag upload failed for', localPath, err);
+                          // Maybe it's a directory, we can try SFTPUploadDirDropped
+                          await SFTPUploadDirDropped(sessionId, localPath, remotePath);
+                      }
+                  }
+                  showStatus("所有项拖拽上传完成", 'success');
+             } catch (err: any) {
+                  setError("拖拽上传错误: " + err.toString());
+                  showStatus("拖拽上传失败", 'error');
+             } finally {
+                  setLoading(false);
+                  loadDirectory(currentPathRef.current);
+             }
+        };
+
+        EventsOn('wails:file-drop', handleFileDrop as any);
+        return () => EventsOff('wails:file-drop');
+    }, [sessionId]);
+
     const handleDoubleClick = (file: connection.FileInfo) => {
         if (file.isDir) {
             let newPath = currentPath;
@@ -115,14 +161,8 @@ export default function SFTPBrowser({ sessionId }: SFTPBrowserProps) {
     const handleUpload = async () => {
         if (!sessionId) return;
         try {
-            const localPath = await OpenFileDialog();
-            if (!localPath) return;
-
             setLoading(true);
-            const fileName = localPath.split(/[\\/]/).pop();
-            const remotePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
-
-            await SFTPUpload(sessionId, localPath, remotePath);
+            await SFTPUpload(sessionId, currentPath);
             await loadDirectory(currentPath);
         } catch (err: any) {
             setError("上传失败: " + err.toString());
@@ -135,15 +175,8 @@ export default function SFTPBrowser({ sessionId }: SFTPBrowserProps) {
     const handleUploadDir = async () => {
         if (!sessionId) return;
         try {
-            const localPath = await OpenDirectoryDialog();
-            if (!localPath) return;
-
-            showStatus(`正在上传目录: ${localPath.split(/[\\/]/).pop()}...`, 'info', 0);
             setLoading(true);
-            const dirName = localPath.split(/[\\/]/).pop();
-            const remotePath = currentPath === '/' ? `/${dirName}` : `${currentPath}/${dirName}`;
-
-            await SFTPUploadDir(sessionId, localPath, remotePath);
+            await SFTPUploadDir(sessionId, currentPath);
             await loadDirectory(currentPath);
         } catch (err: any) {
             setError("目录上传失败: " + err.toString());
@@ -157,17 +190,13 @@ export default function SFTPBrowser({ sessionId }: SFTPBrowserProps) {
         if (!sessionId) return;
         try {
             if (file.isDir) {
-                const savePath = await OpenDirectoryDialog();
-                if (!savePath) return;
                 setLoading(true);
                 const remotePath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
-                await SFTPDownloadDir(sessionId, remotePath, savePath);
+                await SFTPDownloadDir(sessionId, remotePath);
             } else {
-                const savePath = await OpenSaveDialog(file.name);
-                if (!savePath) return;
                 setLoading(true);
                 const remotePath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
-                await SFTPDownload(sessionId, remotePath, savePath);
+                await SFTPDownload(sessionId, remotePath);
             }
         } catch (err: any) {
             setError("下载失败: " + err.toString());
@@ -280,7 +309,10 @@ export default function SFTPBrowser({ sessionId }: SFTPBrowserProps) {
     }
 
     return (
-        <div className="flex flex-col h-full bg-[#0D1117] text-[#C9D1D9] text-sm overflow-hidden border-t border-[#30363D]">
+        <div 
+            className="flex flex-col h-full bg-[#0D1117] text-[#C9D1D9] text-sm overflow-hidden border-t border-[#30363D]"
+            style={{ '--wails-drop-target': 'drop' } as React.CSSProperties}
+        >
             {/* Header */}
             <div className="px-3 py-2 bg-[#161B22] border-b border-[#30363D] flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2">

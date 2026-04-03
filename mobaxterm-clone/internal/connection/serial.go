@@ -2,7 +2,7 @@ package connection
 
 import (
 	"fmt"
-	"io"
+	"sync"
 	"time"
 
 	"mobaxterm-clone/internal/config"
@@ -12,15 +12,23 @@ import (
 
 // serialSession is our implementation of the Session interface for serial ports
 type serialSession struct {
-	port serial.Port
+	port      serial.Port
+	closeOnce sync.Once
 }
 
 func (s *serialSession) Write(data []byte) (int, error) {
 	return s.port.Write(data)
 }
 
+// M5 Fix: Use sync.Once to prevent double-close race
 func (s *serialSession) Close() error {
-	return s.port.Close()
+	var err error
+	s.closeOnce.Do(func() {
+		if s.port != nil {
+			err = s.port.Close()
+		}
+	})
+	return err
 }
 
 func (s *serialSession) Resize(cols, rows int) error {
@@ -74,13 +82,13 @@ func (m *Manager) connectSerial(cfg config.Config) (Session, error) {
 	}
 	var port serial.Port
 	var err error
-	// Retry up to 5 times to allow the OS to release the COM port handle if it was just closed
+	// M4 Fix: Exponential backoff to allow the OS to release the COM port handle
 	for i := 0; i < 5; i++ {
 		port, err = serial.Open(cfg.ComPort, mode)
 		if err == nil {
 			break
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(time.Duration(200*(1<<i)) * time.Millisecond) // 200ms, 400ms, 800ms, 1.6s, 3.2s
 	}
 	if err != nil {
 		return nil, fmt.Errorf("无法打开串口 %s: %w", cfg.ComPort, err)
@@ -99,8 +107,8 @@ func (m *Manager) connectSerial(cfg config.Config) (Session, error) {
 		port: port,
 	}
 
-	// Start pumping output from the serial port to the manager's callbacks
-	go m.pump(cfg.ID, []io.Reader{port}[0])
+	// L2 Fix: Simplified pump call (removed unnecessary intermediate slice)
+	go m.pump(cfg.ID, port)
 
 	return s, nil
 }

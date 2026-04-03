@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"mobaxterm-clone/internal/config"
 
@@ -38,8 +39,36 @@ type MacroStep struct {
 	StepOrder int    `json:"stepOrder"`
 }
 
+type SessionGroup struct {
+	ID        string `json:"id"`
+	ParentID  string `json:"parentId"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"createdAt"`
+}
+
+type DBExpectRule struct {
+	ID           string `json:"id"`
+	SessionID    string `json:"sessionId"`
+	Name         string `json:"name"`
+	RegexTrigger string `json:"regexTrigger"`
+	SendAction   string `json:"sendAction"`
+	IsActive     bool   `json:"isActive"`
+}
+
+type DBTunnelConfig struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Type            string `json:"type"`
+	LocalParam      string `json:"localParam"`
+	RemoteParam     string `json:"remoteParam"`
+	TargetSessionID string `json:"targetSessionId"`
+	IsActive        bool   `json:"isActive"`
+}
+
 type Database struct {
-	db *sql.DB
+	db       *sql.DB
+	logQueue chan CommandLog
+	stopLog  chan struct{}
 }
 
 // InitDB initializes the SQLite database
@@ -124,12 +153,60 @@ func InitDB(dbPath string) (*Database, error) {
 
 	// Migration: Add encoding column to sessions if not exists
 	_, _ = db.Exec("ALTER TABLE sessions ADD COLUMN encoding TEXT")
+	_, _ = db.Exec("ALTER TABLE sessions ADD COLUMN group_id TEXT")
+	_, _ = db.Exec("ALTER TABLE sessions ADD COLUMN private_key TEXT")
 
-	return &Database{db: db}, nil
+	// Create new tables for features 5, 2, 3
+	newTablesSQL := `
+	CREATE TABLE IF NOT EXISTS session_groups (
+		id TEXT PRIMARY KEY,
+		parent_id TEXT,
+		name TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE IF NOT EXISTS expect_rules (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		name TEXT,
+		regex_trigger TEXT NOT NULL,
+		send_action TEXT NOT NULL,
+		is_active INTEGER DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE IF NOT EXISTS ssh_tunnels (
+		id TEXT PRIMARY KEY,
+		name TEXT,
+		forward_type TEXT NOT NULL,
+		local_param TEXT NOT NULL,
+		remote_param TEXT,
+		target_session_id TEXT,
+		is_active INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	`
+	_, err = db.Exec(newTablesSQL)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("创建新增数据表失败: %w", err)
+	}
+
+	database := &Database{
+		db:       db,
+		logQueue: make(chan CommandLog, 1024),
+		stopLog:  make(chan struct{}),
+	}
+
+	// Start the async log writer
+	go database.logWorker()
+
+	return database, nil
 }
 
-// Close closes the database connection
+// Close closes the database connection and workers
 func (d *Database) Close() error {
+	if d.stopLog != nil {
+		close(d.stopLog)
+	}
 	if d.db != nil {
 		return d.db.Close()
 	}
@@ -205,14 +282,14 @@ func (d *Database) SearchEntries(query string) ([]KnowledgeEntry, error) {
 // --- Session Persistence ---
 
 func (d *Database) SaveSession(cfg config.Config) error {
-	upsertSQL := `INSERT OR REPLACE INTO sessions(id, name, protocol, host, port, username, password, baud_rate, com_port, description, encoding)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := d.db.Exec(upsertSQL, cfg.ID, cfg.Name, cfg.Protocol, cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.BaudRate, cfg.ComPort, cfg.Description, cfg.Encoding)
+	upsertSQL := `INSERT OR REPLACE INTO sessions(id, name, protocol, host, port, username, password, baud_rate, com_port, description, encoding, group_id, private_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := d.db.Exec(upsertSQL, cfg.ID, cfg.Name, cfg.Protocol, cfg.Host, cfg.Port, cfg.Username, cfg.Password, cfg.BaudRate, cfg.ComPort, cfg.Description, cfg.Encoding, cfg.GroupID, cfg.PrivateKey)
 	return err
 }
 
 func (d *Database) GetAllSessions() ([]config.Config, error) {
-	rows, err := d.db.Query(`SELECT id, name, protocol, COALESCE(host,''), COALESCE(port,0), COALESCE(username,''), COALESCE(password,''), COALESCE(baud_rate,0), COALESCE(com_port,''), COALESCE(description,''), COALESCE(encoding,'UTF-8') FROM sessions ORDER BY name`)
+	rows, err := d.db.Query(`SELECT id, name, protocol, COALESCE(host,''), COALESCE(port,0), COALESCE(username,''), COALESCE(password,''), COALESCE(baud_rate,0), COALESCE(com_port,''), COALESCE(description,''), COALESCE(encoding,'UTF-8'), COALESCE(group_id,''), COALESCE(private_key,'') FROM sessions ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +298,7 @@ func (d *Database) GetAllSessions() ([]config.Config, error) {
 	var sessions []config.Config
 	for rows.Next() {
 		var s config.Config
-		err = rows.Scan(&s.ID, &s.Name, &s.Protocol, &s.Host, &s.Port, &s.Username, &s.Password, &s.BaudRate, &s.ComPort, &s.Description, &s.Encoding)
+		err = rows.Scan(&s.ID, &s.Name, &s.Protocol, &s.Host, &s.Port, &s.Username, &s.Password, &s.BaudRate, &s.ComPort, &s.Description, &s.Encoding, &s.GroupID, &s.PrivateKey)
 		if err != nil {
 			return nil, err
 		}
@@ -230,8 +307,120 @@ func (d *Database) GetAllSessions() ([]config.Config, error) {
 	return sessions, nil
 }
 
+func (d *Database) GetSession(id string) (config.Config, error) {
+	var s config.Config
+	err := d.db.QueryRow(`SELECT id, name, protocol, COALESCE(host,''), COALESCE(port,0), COALESCE(username,''), COALESCE(password,''), COALESCE(baud_rate,0), COALESCE(com_port,''), COALESCE(description,''), COALESCE(encoding,'UTF-8'), COALESCE(group_id,''), COALESCE(private_key,'') FROM sessions WHERE id = ?`, id).Scan(
+		&s.ID, &s.Name, &s.Protocol, &s.Host, &s.Port, &s.Username, &s.Password, &s.BaudRate, &s.ComPort, &s.Description, &s.Encoding, &s.GroupID, &s.PrivateKey)
+	return s, err
+}
+
 func (d *Database) DeleteSession(id string) error {
 	_, err := d.db.Exec(`DELETE FROM sessions WHERE id = ?`, id)
+	return err
+}
+
+// --- Session Groups Persistence ---
+
+func (d *Database) SaveSessionGroup(g SessionGroup) error {
+	upsertSQL := `INSERT OR REPLACE INTO session_groups(id, parent_id, name) VALUES (?, ?, ?)`
+	_, err := d.db.Exec(upsertSQL, g.ID, g.ParentID, g.Name)
+	return err
+}
+
+func (d *Database) GetAllSessionGroups() ([]SessionGroup, error) {
+	rows, err := d.db.Query(`SELECT id, COALESCE(parent_id,''), name, created_at FROM session_groups ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var groups []SessionGroup
+	for rows.Next() {
+		var g SessionGroup
+		if err := rows.Scan(&g.ID, &g.ParentID, &g.Name, &g.CreatedAt); err != nil {
+			return nil, err
+		}
+		groups = append(groups, g)
+	}
+	return groups, nil
+}
+
+func (d *Database) DeleteSessionGroup(id string) error {
+	_, err := d.db.Exec(`DELETE FROM session_groups WHERE id = ?`, id)
+	return err
+}
+
+// --- Protocol & Automations Persistence ---
+
+func (d *Database) SaveExpectRule(r DBExpectRule) error {
+	activeInt := 0
+	if r.IsActive {
+		activeInt = 1
+	}
+	upsertSQL := `INSERT OR REPLACE INTO expect_rules(id, session_id, name, regex_trigger, send_action, is_active) VALUES (?, ?, ?, ?, ?, ?)`
+	_, err := d.db.Exec(upsertSQL, r.ID, r.SessionID, r.Name, r.RegexTrigger, r.SendAction, activeInt)
+	return err
+}
+
+func (d *Database) GetExpectRules(sessionID string) ([]DBExpectRule, error) {
+	rows, err := d.db.Query(`SELECT id, session_id, name, regex_trigger, send_action, is_active FROM expect_rules WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rules []DBExpectRule
+	for rows.Next() {
+		var r DBExpectRule
+		var activeInt int
+		if err := rows.Scan(&r.ID, &r.SessionID, &r.Name, &r.RegexTrigger, &r.SendAction, &activeInt); err != nil {
+			return nil, err
+		}
+		r.IsActive = (activeInt == 1)
+		rules = append(rules, r)
+	}
+	return rules, nil
+}
+
+func (d *Database) DeleteExpectRule(id string) error {
+	_, err := d.db.Exec(`DELETE FROM expect_rules WHERE id = ?`, id)
+	return err
+}
+
+// --- Tunnel Persistence ---
+
+func (d *Database) SaveTunnelConfig(t DBTunnelConfig) error {
+	activeInt := 0
+	if t.IsActive {
+		activeInt = 1
+	}
+	upsertSQL := `INSERT OR REPLACE INTO ssh_tunnels(id, name, forward_type, local_param, remote_param, target_session_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	_, err := d.db.Exec(upsertSQL, t.ID, t.Name, t.Type, t.LocalParam, t.RemoteParam, t.TargetSessionID, activeInt)
+	return err
+}
+
+func (d *Database) GetAllTunnels() ([]DBTunnelConfig, error) {
+	rows, err := d.db.Query(`SELECT id, name, forward_type, local_param, COALESCE(remote_param,''), COALESCE(target_session_id,''), is_active FROM ssh_tunnels`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tunnels []DBTunnelConfig
+	for rows.Next() {
+		var t DBTunnelConfig
+		var activeInt int
+		if err := rows.Scan(&t.ID, &t.Name, &t.Type, &t.LocalParam, &t.RemoteParam, &t.TargetSessionID, &activeInt); err != nil {
+			return nil, err
+		}
+		t.IsActive = (activeInt == 1)
+		tunnels = append(tunnels, t)
+	}
+	return tunnels, nil
+}
+
+func (d *Database) DeleteTunnel(id string) error {
+	_, err := d.db.Exec(`DELETE FROM ssh_tunnels WHERE id = ?`, id)
 	return err
 }
 
@@ -285,7 +474,6 @@ func (d *Database) GetAllMacros() ([]Macro, error) {
 	defer rows.Close()
 
 	macroMap := make(map[string]*Macro)
-	var result []Macro
 	var order []string
 
 	for rows.Next() {
@@ -308,9 +496,8 @@ func (d *Database) GetAllMacros() ([]Macro, error) {
 				CreatedAt:   mcreated,
 				Steps:       []MacroStep{},
 			}
-			macroMap[mid] = m
-			result = append(result, *m) // This is a copy, we'll fix it below
-			order = append(order, mid)
+		macroMap[mid] = m
+		order = append(order, mid)
 		}
 
 		if sid.Valid {
@@ -359,13 +546,72 @@ func (d *Database) DeleteMacro(id string) error {
 
 // --- Command Logging ---
 
+// logWorker processes the asynchronous log queue to prevent SQLite 'database is locked' errors.
+// It uses a buffered approach: write either when we reach a batch size limit, or when 1 second passes.
+func (d *Database) logWorker() {
+	var batch []CommandLog
+	// Flush timer
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		
+		// Use a transaction for batch insert to drastically improve SQLite performance
+		tx, err := d.db.Begin()
+		if err != nil {
+			return // Skip this batch on unexpected begin error
+		}
+
+		stmt, err := tx.Prepare(`INSERT INTO command_logs(session_id, session_name, host, protocol, command) VALUES (?, ?, ?, ?, ?)`)
+		if err == nil {
+			for _, logItem := range batch {
+				stmt.Exec(logItem.SessionID, logItem.SessionName, logItem.Host, logItem.Protocol, logItem.Command)
+			}
+			stmt.Close()
+		}
+
+		tx.Commit()
+		batch = batch[:0] // Reset batch slice
+	}
+
+	for {
+		select {
+		case logItem := <-d.logQueue:
+			batch = append(batch, logItem)
+			if len(batch) >= 50 { // flush at 50 logs
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		case <-d.stopLog:
+			flush() // One final flush before exiting
+			return
+		}
+	}
+}
+
 func (d *Database) AddCommandLog(sessionID, sessionName, host, protocol, command string) error {
 	if command == "" {
 		return nil
 	}
-	_, err := d.db.Exec(`INSERT INTO command_logs(session_id, session_name, host, protocol, command) VALUES (?, ?, ?, ?, ?)`,
-		sessionID, sessionName, host, protocol, command)
-	return err
+	// E3 Fix: Push to channel non-blocking to avoid freezing during high frequency
+	select {
+	case d.logQueue <- CommandLog{
+		SessionID:   sessionID,
+		SessionName: sessionName,
+		Host:        host,
+		Protocol:    protocol,
+		Command:     command,
+	}:
+		// Successfully queued
+	default:
+		// Queue is full (very rare), drop log to prefer terminal latency
+	}
+
+	return nil
 }
 
 type CommandLog struct {
@@ -379,23 +625,24 @@ type CommandLog struct {
 }
 
 func (d *Database) GetCommandLogs(query string, limit int) ([]CommandLog, error) {
-	sql := `SELECT id, session_id, COALESCE(session_name,''), COALESCE(host,''), COALESCE(protocol,''), command, datetime(timestamp, 'localtime') 
+	// H1 Fix: renamed from 'sql' to avoid shadowing the database/sql package import
+	queryStr := `SELECT id, session_id, COALESCE(session_name,''), COALESCE(host,''), COALESCE(protocol,''), command, datetime(timestamp, 'localtime') 
 	        FROM command_logs`
 	var args []interface{}
 	if query != "" {
-		sql += " WHERE command LIKE ? OR session_name LIKE ? OR host LIKE ?"
+		queryStr += " WHERE command LIKE ? OR session_name LIKE ? OR host LIKE ?"
 		q := "%" + query + "%"
 		args = append(args, q, q, q)
 	}
-	sql += " ORDER BY id DESC"
+	queryStr += " ORDER BY id DESC"
 	if limit > 0 {
-		sql += " LIMIT ?"
+		queryStr += " LIMIT ?"
 		args = append(args, limit)
 	} else {
-		sql += " LIMIT 1000"
+		queryStr += " LIMIT 1000"
 	}
 
-	rows, err := d.db.Query(sql, args...)
+	rows, err := d.db.Query(queryStr, args...)
 	if err != nil {
 		return nil, err
 	}

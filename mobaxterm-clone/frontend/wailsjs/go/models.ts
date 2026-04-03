@@ -16,6 +16,8 @@ export namespace config {
 	    comPort?: string;
 	    description?: string;
 	    encoding?: string;
+	    groupId?: string;
+	    privateKey?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -38,6 +40,8 @@ export namespace config {
 	        this.comPort = source["comPort"];
 	        this.description = source["description"];
 	        this.encoding = source["encoding"];
+	        this.groupId = source["groupId"];
+	        this.privateKey = source["privateKey"];
 	    }
 	}
 
@@ -63,6 +67,36 @@ export namespace connection {
 	        this.mode = source["mode"];
 	        this.modTime = source["modTime"];
 	        this.isDir = source["isDir"];
+	    }
+	}
+	export class TunnelConfig {
+	    id: string;
+	    name: string;
+	    type: string;
+	    localParam: string;
+	    remoteParam: string;
+	    host: string;
+	    port: number;
+	    username: string;
+	    password: string;
+	    privateKey: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TunnelConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.localParam = source["localParam"];
+	        this.remoteParam = source["remoteParam"];
+	        this.host = source["host"];
+	        this.port = source["port"];
+	        this.username = source["username"];
+	        this.password = source["password"];
+	        this.privateKey = source["privateKey"];
 	    }
 	}
 
@@ -92,6 +126,52 @@ export namespace db {
 	        this.protocol = source["protocol"];
 	        this.command = source["command"];
 	        this.timestamp = source["timestamp"];
+	    }
+	}
+	export class DBExpectRule {
+	    id: string;
+	    sessionId: string;
+	    name: string;
+	    regexTrigger: string;
+	    sendAction: string;
+	    isActive: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DBExpectRule(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.sessionId = source["sessionId"];
+	        this.name = source["name"];
+	        this.regexTrigger = source["regexTrigger"];
+	        this.sendAction = source["sendAction"];
+	        this.isActive = source["isActive"];
+	    }
+	}
+	export class DBTunnelConfig {
+	    id: string;
+	    name: string;
+	    type: string;
+	    localParam: string;
+	    remoteParam: string;
+	    targetSessionId: string;
+	    isActive: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DBTunnelConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.localParam = source["localParam"];
+	        this.remoteParam = source["remoteParam"];
+	        this.targetSessionId = source["targetSessionId"];
+	        this.isActive = source["isActive"];
 	    }
 	}
 	export class KnowledgeEntry {
@@ -171,6 +251,25 @@ export namespace db {
 		    }
 		    return a;
 		}
+	}
+	
+	export class SessionGroup {
+	    id: string;
+	    parentId: string;
+	    name: string;
+	    createdAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionGroup(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.parentId = source["parentId"];
+	        this.name = source["name"];
+	        this.createdAt = source["createdAt"];
+	    }
 	}
 
 }
